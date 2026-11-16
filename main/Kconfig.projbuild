@@ -197,6 +197,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_ECHOEAR_WAVESHARE_1_75B
         bool "EchoEar Waveshare ESP32-S3 AMOLED 1.75-B"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_ECHOEAR_WAVESHARE_1_32
+        bool "EchoEar Waveshare ESP32-S3 Touch AMOLED 1.32"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_ELECTRON_BOT
         bool "ElectronBot"
         depends on IDF_TARGET_ESP32S3
