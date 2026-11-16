@@ -260,6 +260,21 @@ class VersionTests(unittest.TestCase):
         self.assertIn("CONFIG_SPIRAM=y", s3_defaults)
         self.assertIn("CONFIG_SPIRAM_MODE_OCT=y", s3_defaults)
 
+    def test_echoear_waveshare_132_co5300_init_sequence(self):
+        source = (
+            ROOT / "main/boards/echoear-waveshare-1.32/"
+            "echoear-waveshare-1.32.cc"
+        ).read_text(encoding="utf-8")
+        for command in (
+            "{0xFE, (uint8_t[]) {0x20}, 1, 0}",
+            "{0x19, (uint8_t[]) {0x10}, 1, 0}",
+            "{0x1C, (uint8_t[]) {0xA0}, 1, 0}",
+            "{0x2B, (uint8_t[]) {0x00, 0x00, 0x01, 0xD1}, 4, 600}",
+            "{0x11, nullptr, 0, 600}",
+            "{0x29, nullptr, 0, 0}",
+        ):
+            self.assertIn(command, source)
+
     def test_default_flash_options_are_not_repeated(self):
         def read_defaults(path):
             values = {}
