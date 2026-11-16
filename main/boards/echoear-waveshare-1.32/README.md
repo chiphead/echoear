@@ -18,7 +18,6 @@ The pin definitions in `config.h` are copied from the official Xiaozhi board def
 
 The 1.32 board does not expose the 1.75-B board's dual-microphone / ES7210 audio path, SD interface, or validated AEC reference channel. Those capabilities are explicitly disabled in the EchoEar target profile.
 
-
 ## Build (Windows PowerShell / ESP-IDF 6.1)
 
 Open an ESP-IDF 6.1 terminal at the repository root, then initialize the pinned core:
@@ -38,8 +37,7 @@ The build script manages the target and sdkconfig configuration. After building,
 The initial board driver ports the official 1.32 CO5300 QSPI panel initialization, CST820 I2C touch, power-key sequencing, BOOT key, CO5300 DCS brightness command and ES8311 audio initialization into an EchoEar-specific board identity. It is still a work-in-progress and is not yet a flash-ready release:
 - Touch coordinate orientation and gesture behavior need physical verification.
 - The 8 MB partition and bundled EchoEar assets need a size/build check.
-- Audio capture/playback, wake word, interruption and sleep/wake need hardware acceptance.
-- Screen rotation, display offsets, audio capture/playback, wake word, interruption, power key and sleep/wake need hardware acceptance.
+- Screen rotation, display offsets, touch mapping, audio capture/playback, wake word, interruption, power key and sleep/wake need hardware acceptance.
 - Do not flash a package until the board driver and partition/asset size checks are complete.
 
 The shared EchoEar UI and applications are provided by the pinned `external/echoear-core` submodule.
