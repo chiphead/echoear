@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-BOARDS = {'waveshare': 'echoear-waveshare-1.75b', 'viewe': 'echoear-viewe-1.75'}
+BOARDS = {'waveshare': 'echoear-waveshare-1.75b', 'waveshare-132': 'echoear-waveshare-1.32', 'viewe': 'echoear-viewe-1.75'}
 KNOWN_DEVICES = {'30:ed:a0:29:a5:20': 'waveshare', '10:51:db:8e:d9:7c': 'viewe'}
 
 
