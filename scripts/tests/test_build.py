@@ -223,6 +223,37 @@ class VersionTests(unittest.TestCase):
         self.assertEqual(options["CONFIG_ECHOEAR_UI_REVIEW"], "n")
         self.assertTrue((ROOT / "partitions/v2/8m.csv").is_file())
 
+        kconfig = (ROOT / "main/Kconfig.projbuild").read_text(encoding="utf-8")
+        self.assertIn(
+            "config BOARD_TYPE_ECHOEAR_WAVESHARE_1_32", kconfig
+        )
+        cmake = (ROOT / "main/CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn(
+            'set(BOARD_DIR "echoear-waveshare-1.32")', cmake
+        )
+        board_source = (
+            ROOT / "main/boards/echoear-waveshare-1.32/"
+            "echoear-waveshare-1.32.cc"
+        )
+        self.assertTrue(board_source.is_file())
+        manifest = (ROOT / "main/idf_component.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("espressif/esp_lcd_co5300:", manifest)
+        self.assertIn("kodediy/esp_lcd_touch_cst820:", manifest)
+
+        partition_lines = [
+            line.split("#", 1)[0].strip()
+            for line in (ROOT / "partitions/v2/8m.csv").read_text(
+                encoding="utf-8"
+            ).splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        assets = next(
+            line for line in partition_lines if line.startswith("assets,")
+        )
+        self.assertEqual(assets.split(",")[4].strip(), "2M")
+
         s3_defaults = (
             ROOT / "sdkconfig.defaults.esp32s3"
         ).read_text(encoding="utf-8")
