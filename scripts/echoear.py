@@ -164,5 +164,5 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+    except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError) as error:
         sys.exit(str(error))
