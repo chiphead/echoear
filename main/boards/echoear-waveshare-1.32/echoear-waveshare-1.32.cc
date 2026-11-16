@@ -1,5 +1,6 @@
 #include "application.h"
 #include "button.h"
+#include "backlight.h"
 #include "codecs/es8311_audio_codec.h"
 #include "config.h"
 #include "wifi_board.h"
@@ -42,6 +43,25 @@ public:
     }
 };
 
+class EchoEarBacklight : public Backlight {
+public:
+    explicit EchoEarBacklight(esp_lcd_panel_io_handle_t panel_io)
+        : panel_io_(panel_io) {}
+
+protected:
+    void SetBrightnessImpl(uint8_t brightness) override {
+        auto* display = Board::GetInstance().GetDisplay();
+        DisplayLockGuard lock(display);
+        const uint8_t value = static_cast<uint8_t>((255U * brightness) / 100U);
+        const uint32_t command = (0x51U << 8) | (0x02U << 24);
+        ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(panel_io_, command,
+                                                   &value, sizeof(value)));
+    }
+
+private:
+    esp_lcd_panel_io_handle_t panel_io_;
+};
+
 class EchoEarWaveshare132Board : public WifiBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_{};
@@ -50,6 +70,7 @@ private:
     esp_lcd_panel_handle_t panel_handle_{};
     esp_lcd_panel_io_handle_t io_handle_{};
     EchoEarLcdDisplay* display_{};
+    EchoEarBacklight* backlight_{};
 
     void InitializeI2c() {
         i2c_master_bus_config_t config{};
@@ -122,6 +143,8 @@ private:
             EXAMPLE_LCD_H_RES, EXAMPLE_LCD_V_RES,
             DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        backlight_ = new EchoEarBacklight(io_handle_);
+        backlight_->RestoreBrightness();
     }
 
     void InitializePower() {
@@ -159,6 +182,10 @@ public:
 
     Display* GetDisplay() override {
         return display_;
+    }
+
+    Backlight* GetBacklight() override {
+        return backlight_;
     }
 };
 
