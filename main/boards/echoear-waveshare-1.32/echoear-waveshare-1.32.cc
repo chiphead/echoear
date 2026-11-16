@@ -6,7 +6,9 @@
 #include "wifi_board.h"
 
 #include "display/lcd_display.h"
-#include "esp_lcd_sh8601.h"
+#include "esp_lcd_co5300.h"
+#include "esp_lcd_touch_cst820.h"
+#include <esp_lvgl_port.h>
 #include "lvgl.h"
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
@@ -15,7 +17,7 @@
 
 #define TAG "echoear_waveshare_1_32"
 
-static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
+static const co5300_lcd_init_cmd_t lcd_init_cmds[] = {
     {0xFE, (uint8_t[]) {0x00}, 1, 0},
     {0xC4, (uint8_t[]) {0x80}, 1, 0},
     {0x3A, (uint8_t[]) {0x55}, 1, 0},
@@ -25,7 +27,7 @@ static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
     {0x63, (uint8_t[]) {0xFF}, 1, 0},
     {0x2A, (uint8_t[]) {0x00, 0x06, 0x01, 0xD7}, 4, 0},
     {0x2B, (uint8_t[]) {0x00, 0x00, 0x01, 0xD1}, 4, 0},
-    {0x11, (uint8_t[]) {0x00}, 0, 100},
+    {0x11, nullptr, 0, 100},
     {0x29, (uint8_t[]) {0x00}, 0, 0},
 };
 
@@ -71,6 +73,8 @@ private:
     esp_lcd_panel_io_handle_t io_handle_{};
     EchoEarLcdDisplay* display_{};
     EchoEarBacklight* backlight_{};
+    esp_lcd_touch_handle_t touch_{};
+    lv_indev_t* touch_indev_{};
 
     void InitializeI2c() {
         i2c_master_bus_config_t config{};
@@ -123,7 +127,7 @@ private:
         io_config.flags.quad_mode = true;
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &io_handle_));
 
-        sh8601_vendor_config_t vendor_config{};
+        co5300_vendor_config_t vendor_config{};
         vendor_config.init_cmds = lcd_init_cmds;
         vendor_config.init_cmds_size = sizeof(lcd_init_cmds) / sizeof(lcd_init_cmds[0]);
         vendor_config.flags.use_qspi_interface = true;
@@ -134,7 +138,7 @@ private:
         panel_config.bits_per_pixel = 16;
         panel_config.vendor_config = &vendor_config;
 
-        ESP_ERROR_CHECK(esp_lcd_new_panel_sh8601(io_handle_, &panel_config, &panel_handle_));
+        ESP_ERROR_CHECK(esp_lcd_new_panel_co5300(io_handle_, &panel_config, &panel_handle_));
         ESP_ERROR_CHECK(esp_lcd_panel_set_gap(panel_handle_, 0x06, 0x00));
         ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle_));
         ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle_));
@@ -145,6 +149,35 @@ private:
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
         backlight_ = new EchoEarBacklight(io_handle_);
         backlight_->RestoreBrightness();
+    }
+
+    void InitializeTouch() {
+        const esp_lcd_touch_config_t touch_config = {
+            .x_max = EXAMPLE_LCD_H_RES,
+            .y_max = EXAMPLE_LCD_V_RES,
+            .rst_gpio_num = GPIO_NUM_7,
+            .int_gpio_num = GPIO_NUM_6,
+            .levels = {
+                .reset = 0,
+                .interrupt = 0,
+            },
+            .flags = {
+                .swap_xy = false,
+                .mirror_x = false,
+                .mirror_y = false,
+            },
+        };
+        esp_lcd_panel_io_handle_t touch_io = nullptr;
+        esp_lcd_panel_io_i2c_config_t io_config = ESP_LCD_TOUCH_IO_I2C_CST820_CONFIG();
+        io_config.scl_speed_hz = 400 * 1000;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus_, &io_config, &touch_io));
+        ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_cst820(touch_io, &touch_config, &touch_));
+        const lvgl_port_touch_cfg_t lvgl_touch_config = {
+            .disp = lv_display_get_default(),
+            .handle = touch_,
+        };
+        touch_indev_ = lvgl_port_add_touch(&lvgl_touch_config);
+        ESP_ERROR_CHECK(touch_indev_ ? ESP_OK : ESP_FAIL);
     }
 
     void InitializePower() {
@@ -168,6 +201,7 @@ public:
         InitializeI2c();
         InitializeSpi();
         InitializeLcdDisplay();
+        InitializeTouch();
         InitializeButtons();
     }
 
