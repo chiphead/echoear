@@ -8,6 +8,7 @@
             "sdkconfig_append": [
                 "CONFIG_BOARD_TYPE_ECHOEAR_WAVESHARE_1_32=y",
                 "CONFIG_USE_WECHAT_MESSAGE_STYLE=n",
+                "CONFIG_USE_DEVICE_AEC=n",
                 "CONFIG_ECHOEAR_UI=y",
                 "CONFIG_ECHOEAR_UI_REVIEW=n",
                 "CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y",
