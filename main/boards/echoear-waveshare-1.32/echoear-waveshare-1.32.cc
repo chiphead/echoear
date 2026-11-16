@@ -7,7 +7,6 @@
 #include "display/lcd_display.h"
 #include "esp_lcd_sh8601.h"
 #include "lvgl.h"
-#include "mcp_server.h"
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
 #include <esp_lcd_panel_vendor.h>
@@ -139,18 +138,6 @@ private:
         }
     }
 
-    void InitializeTools() {
-        auto& server = McpServer::GetInstance();
-        server.AddTool("self.disp.setbacklight", "设置屏幕亮度",
-            PropertyList({Property("level", kPropertyTypeInteger, 0, 255)}),
-            [](const PropertyList& properties) -> ReturnValue {
-                const int level = properties["level"].value<int>();
-                // SH8601 brightness is controlled by DCS command 0x51.
-                // Keep the panel I/O handle in the board instance for runtime changes.
-                (void)level;
-                return false;
-            });
-    }
 
 public:
     EchoEarWaveshare132Board() {
