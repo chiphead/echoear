@@ -199,6 +199,36 @@ class VersionTests(unittest.TestCase):
                         f"0, not letter O: {option}",
                     )
 
+    def test_echoear_waveshare_132_build_configuration(self):
+        config_path = (
+            ROOT / "main/boards/echoear-waveshare-1.32/config.json"
+        )
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        self.assertEqual(config["target"], "esp32s3")
+        self.assertEqual(len(config["builds"]), 1)
+
+        options = build._sdkconfig_assignments(
+            config["builds"][0]["sdkconfig_append"]
+        )
+        self.assertEqual(
+            options["CONFIG_BOARD_TYPE_ECHOEAR_WAVESHARE_1_32"], "y"
+        )
+        self.assertEqual(options["CONFIG_ESPTOOLPY_FLASHSIZE_8MB"], "y")
+        self.assertEqual(
+            options["CONFIG_PARTITION_TABLE_CUSTOM_FILENAME"],
+            '"partitions/v2/8m.csv"',
+        )
+        self.assertEqual(options["CONFIG_USE_DEVICE_AEC"], "n")
+        self.assertEqual(options["CONFIG_ECHOEAR_UI"], "y")
+        self.assertEqual(options["CONFIG_ECHOEAR_UI_REVIEW"], "n")
+        self.assertTrue((ROOT / "partitions/v2/8m.csv").is_file())
+
+        s3_defaults = (
+            ROOT / "sdkconfig.defaults.esp32s3"
+        ).read_text(encoding="utf-8")
+        self.assertIn("CONFIG_SPIRAM=y", s3_defaults)
+        self.assertIn("CONFIG_SPIRAM_MODE_OCT=y", s3_defaults)
+
     def test_default_flash_options_are_not_repeated(self):
         def read_defaults(path):
             values = {}
