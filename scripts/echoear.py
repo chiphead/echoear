@@ -28,7 +28,7 @@ def exclusive_lock(lock_file):
         lock_file.seek(0)
         if lock_file.read(1) == '':
             lock_file.seek(0)
-            lock_file.write('\\0')
+            lock_file.write('\0')
             lock_file.flush()
         lock_file.seek(0)
         try:
