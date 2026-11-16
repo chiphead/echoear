@@ -127,6 +127,7 @@ private:
         config.data2_io_num = LCD_D2;
         config.data3_io_num = LCD_D3;
         config.max_transfer_sz = EXAMPLE_LCD_H_RES * EXAMPLE_LCD_V_RES * sizeof(uint16_t);
+        config.flags = SPICOMMON_BUSFLAG_QUAD;
         ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &config, SPI_DMA_CH_AUTO));
     }
 
