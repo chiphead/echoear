@@ -20,7 +20,7 @@ The 1.32 board does not expose the 1.75-B board's dual-microphone / ES7210 audio
 
 ## Port status
 
-The initial board driver ports the official 1.32 CO5300 QSPI panel initialization, CST820 I2C touch, power-key sequencing, BOOT key, SH8601-style DCS brightness command and ES8311 audio initialization into an EchoEar-specific board identity. It is still a work-in-progress and is not yet a flash-ready release:
+The initial board driver ports the official 1.32 CO5300 QSPI panel initialization, CST820 I2C touch, power-key sequencing, BOOT key, CO5300 DCS brightness command and ES8311 audio initialization into an EchoEar-specific board identity. It is still a work-in-progress and is not yet a flash-ready release:
 - Touch coordinate orientation and gesture behavior need physical verification.
 - The 8 MB partition and bundled EchoEar assets need a size/build check.
 - Audio capture/playback, wake word, interruption and sleep/wake need hardware acceptance.
