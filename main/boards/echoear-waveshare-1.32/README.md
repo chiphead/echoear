@@ -18,6 +18,21 @@ The pin definitions in `config.h` are copied from the official Xiaozhi board def
 
 The 1.32 board does not expose the 1.75-B board's dual-microphone / ES7210 audio path, SD interface, or validated AEC reference channel. Those capabilities are explicitly disabled in the EchoEar target profile.
 
+
+## Build (Windows PowerShell / ESP-IDF 6.1)
+
+Open an ESP-IDF 6.1 terminal at the repository root, then initialize the pinned core:
+
+```powershell
+git submodule update --init --recursive
+python -m unittest discover -s scripts/tests -v
+python scripts/build.py echoear-waveshare-1.32 --name echoear-waveshare-1.32 --language zh-CN
+```
+
+The board variant selects the ESP32-S3 target, 8 MB flash size, the 8 MB partition table, and the shared ESP32-S3 OPI-PSRAM defaults. Do not copy the 1.75-B board's audio/AEC or SD-card settings into this target.
+
+The build script manages the target and sdkconfig configuration. After building, inspect `sdkconfig` and `build/flasher_args.json` before flashing. Confirm the effective flash size is 8 MB, the partition table is `partitions/v2/8m.csv`, and the assets image fits the 2 MB assets partition.
+
 ## Port status
 
 The initial board driver ports the official 1.32 CO5300 QSPI panel initialization, CST820 I2C touch, power-key sequencing, BOOT key, CO5300 DCS brightness command and ES8311 audio initialization into an EchoEar-specific board identity. It is still a work-in-progress and is not yet a flash-ready release:
