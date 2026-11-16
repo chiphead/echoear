@@ -13,7 +13,8 @@ The pin definitions in `config.h` are copied from the official Xiaozhi board def
 - BOOT: GPIO0; power key: GPIO17; power enable: GPIO18
 - LCD: CS10, PCLK11, D0..D3 = 12..15, RESET8
 - Audio I2S: MCLK38, WS41, BCLK39, DIN40, DOUT42
-- Codec I2C: SDA47, SCL48; PA enable GPIO46
+- Codec / touch I2C: SDA47, SCL48; CST820 address 0x15, reset GPIO7, interrupt GPIO6
+- PA enable GPIO46; 8 MB Flash uses the repository's `partitions/v2/8m.csv` layout (2 MB assets partition)
 
 The 1.32 board does not expose the 1.75-B board's dual-microphone / ES7210 audio path, SD interface, or validated AEC reference channel. Those capabilities are explicitly disabled in the EchoEar target profile.
 
