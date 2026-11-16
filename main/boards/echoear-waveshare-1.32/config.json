@@ -1,6 +1,5 @@
 {
     "type": "echoear-waveshare-1.32",
-    "manufacturer": "Waveshare",
     "target": "esp32s3",
     "builds": [
         {
