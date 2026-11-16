@@ -31,6 +31,14 @@ static const co5300_lcd_init_cmd_t lcd_init_cmds[] = {
     {0x29, (uint8_t[]) {0x00}, 0, 0},
 };
 
+static void co5300_rounder_event_cb(lv_event_t* event) {
+    auto* area = static_cast<lv_area_t*>(lv_event_get_param(event));
+    area->x1 = (area->x1 >> 1) << 1;
+    area->y1 = (area->y1 >> 1) << 1;
+    area->x2 = ((area->x2 >> 1) << 1) + 1;
+    area->y2 = ((area->y2 >> 1) << 1) + 1;
+}
+
 class EchoEarLcdDisplay : public SpiLcdDisplay {
 public:
     EchoEarLcdDisplay(esp_lcd_panel_io_handle_t io_handle,
@@ -42,6 +50,13 @@ public:
         uint32_t command = (0x36U << 8) | (0x02U << 24);
         uint8_t rotation = 0xC0;
         esp_lcd_panel_io_tx_param(io_handle, command, &rotation, 1);
+    }
+
+    void SetupUI() override {
+        SpiLcdDisplay::SetupUI();
+        DisplayLockGuard lock(this);
+        lv_display_add_event_cb(display_, co5300_rounder_event_cb,
+                                LV_EVENT_INVALIDATE_AREA, nullptr);
     }
 };
 
@@ -163,8 +178,8 @@ private:
             },
             .flags = {
                 .swap_xy = false,
-                .mirror_x = false,
-                .mirror_y = false,
+                .mirror_x = true,
+                .mirror_y = true,
             },
         };
         esp_lcd_panel_io_handle_t touch_io = nullptr;
