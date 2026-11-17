@@ -5,7 +5,7 @@
 #include "config.h"
 #include "wifi_board.h"
 
-#include "display/lcd_display.h"
+#include "echoear_display.h"
 #include "esp_lcd_co5300.h"
 #include "esp_lcd_touch_cst820.h"
 #include <esp_lvgl_port.h>
@@ -35,33 +35,22 @@ static const co5300_lcd_init_cmd_t lcd_init_cmds[] = {
     {0x29, nullptr, 0, 0},
 };
 
-static void co5300_rounder_event_cb(lv_event_t* event) {
-    auto* area = static_cast<lv_area_t*>(lv_event_get_param(event));
-    area->x1 = (area->x1 >> 1) << 1;
-    area->y1 = (area->y1 >> 1) << 1;
-    area->x2 = ((area->x2 >> 1) << 1) + 1;
-    area->y2 = ((area->y2 >> 1) << 1) + 1;
-}
-
-class EchoEarLcdDisplay : public SpiLcdDisplay {
+class EchoEarLcdDisplay : public EchoEarDisplay {
 public:
     EchoEarLcdDisplay(esp_lcd_panel_io_handle_t io_handle,
                       esp_lcd_panel_handle_t panel_handle,
                       int width, int height, int offset_x, int offset_y,
                       bool mirror_x, bool mirror_y, bool swap_xy)
-        : SpiLcdDisplay(io_handle, panel_handle, width, height, offset_x,
-                        offset_y, mirror_x, mirror_y, swap_xy) {
-        uint32_t command = (0x36U << 8) | (0x02U << 24);
-        uint8_t rotation = 0xC0;
-        esp_lcd_panel_io_tx_param(io_handle, command, &rotation, 1);
+        : EchoEarDisplay(io_handle, panel_handle, width, height, offset_x,
+                         offset_y, mirror_x, mirror_y, swap_xy) {
+        // Keep the panel's hardware orientation used by the working 1.32 port.
+        const uint32_t command = (0x36U << 8) | (0x02U << 24);
+        const uint8_t rotation = 0xC0;
+        ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(io_handle, command, &rotation, 1));
     }
 
-    void SetupUI() override {
-        SpiLcdDisplay::SetupUI();
-        DisplayLockGuard lock(this);
-        lv_display_add_event_cb(display_, co5300_rounder_event_cb,
-                                LV_EVENT_INVALIDATE_AREA, nullptr);
-    }
+    // EchoEarDisplay::SetupUI() builds the actual EchoEar home screen, settings,
+    // pet panel and local apps. It also installs the CO5300 even-area rounder.
 };
 
 class EchoEarBacklight : public Backlight {
@@ -225,7 +214,6 @@ private:
             vTaskDelay(pdMS_TO_TICKS(10));
         }
     }
-
 
 public:
     EchoEarWaveshare132Board() {
