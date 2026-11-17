@@ -188,8 +188,20 @@ private:
             },
         };
         esp_lcd_panel_io_handle_t touch_io = nullptr;
-        esp_lcd_panel_io_i2c_config_t io_config = ESP_LCD_TOUCH_IO_I2C_CST820_CONFIG();
+
+        // ESP-IDF 6.1 reordered this structure's members. Avoid the
+        // CST820 component macro, whose designated initializer follows
+        // the older layout and is rejected by the C++ compiler.
+        esp_lcd_panel_io_i2c_config_t io_config{};
+        io_config.dev_addr = ESP_LCD_TOUCH_IO_I2C_CST820_ADDRESS;
         io_config.scl_speed_hz = 400 * 1000;
+        io_config.control_phase_bytes = 1;
+        io_config.dc_bit_offset = 0;
+        io_config.lcd_cmd_bits = 8;
+        io_config.lcd_param_bits = 0;
+        io_config.flags.dc_low_on_data = 0;
+        io_config.flags.disable_control_phase = 1;
+
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus_, &io_config, &touch_io));
         ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_cst820(touch_io, &touch_config, &touch_));
         const lvgl_port_touch_cfg_t lvgl_touch_config = {
