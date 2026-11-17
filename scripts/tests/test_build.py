@@ -199,6 +199,19 @@ class VersionTests(unittest.TestCase):
                         f"0, not letter O: {option}",
                     )
 
+    def test_board_sdkconfig_defaults_override_project_defaults(self):
+        defaults = build._sdkconfig_defaults_files(
+            Path("build/xiaozhi-build.sdkconfig.defaults"),
+            ROOT / "sdkconfig.defaults",
+        )
+        self.assertEqual(
+            defaults,
+            [
+                "build/xiaozhi-build.sdkconfig.defaults",
+                (ROOT / "sdkconfig.defaults").as_posix(),
+            ],
+        )
+
     def test_echoear_waveshare_132_build_configuration(self):
         config_path = (
             ROOT / "main/boards/echoear-waveshare-1.32/config.json"
@@ -214,6 +227,7 @@ class VersionTests(unittest.TestCase):
             options["CONFIG_BOARD_TYPE_ECHOEAR_WAVESHARE_1_32"], "y"
         )
         self.assertEqual(options["CONFIG_ESPTOOLPY_FLASHSIZE_8MB"], "y")
+        self.assertEqual(options["CONFIG_PARTITION_TABLE_CUSTOM"], "y")
         self.assertEqual(
             options["CONFIG_PARTITION_TABLE_CUSTOM_FILENAME"],
             '"partitions/v2/8m.csv"',
