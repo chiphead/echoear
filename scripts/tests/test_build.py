@@ -207,8 +207,8 @@ class VersionTests(unittest.TestCase):
         self.assertEqual(
             defaults,
             [
-                "build/xiaozhi-build.sdkconfig.defaults",
                 (ROOT / "sdkconfig.defaults").as_posix(),
+                "build/xiaozhi-build.sdkconfig.defaults",
             ],
         )
 
@@ -227,6 +227,7 @@ class VersionTests(unittest.TestCase):
             options["CONFIG_BOARD_TYPE_ECHOEAR_WAVESHARE_1_32"], "y"
         )
         self.assertEqual(options["CONFIG_ESPTOOLPY_FLASHSIZE_8MB"], "y")
+        self.assertEqual(options["CONFIG_ESPTOOLPY_FLASHSIZE_16MB"], "n")
         self.assertEqual(options["CONFIG_PARTITION_TABLE_CUSTOM"], "y")
         self.assertEqual(
             options["CONFIG_PARTITION_TABLE_CUSTOM_FILENAME"],
