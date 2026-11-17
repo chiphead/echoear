@@ -1435,10 +1435,11 @@ def _sdkconfig_defaults_files(
     fragment: Path,
     project_defaults: Path = Path("sdkconfig.defaults"),
 ) -> list[str]:
-    """Return defaults in priority order: board overrides before project defaults."""
-    defaults = [fragment.as_posix()]
+    """Return project defaults first, then board-specific overrides."""
+    defaults = []
     if project_defaults.exists():
         defaults.append(project_defaults.as_posix())
+    defaults.append(fragment.as_posix())
     return defaults
 
 
@@ -1465,9 +1466,8 @@ def _configure_build(
         encoding="utf-8",
     )
 
-    # ESP-IDF uses the first SDKCONFIG_DEFAULTS file as the higher-priority
-    # source. Put board-specific settings first so they can override the
-    # repository-wide defaults (for example 8MB boards over the global 16MB).
+    # ESP-IDF applies SDKCONFIG_DEFAULTS files in order; later files override
+    # earlier ones. Keep the repository defaults first and board settings last.
     defaults = _sdkconfig_defaults_files(fragment)
     _run_idf(
         f"-DIDF_TARGET={target}",
