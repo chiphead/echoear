@@ -43,11 +43,8 @@ public:
                       bool mirror_x, bool mirror_y, bool swap_xy)
         : EchoEarDisplay(io_handle, panel_handle, width, height, offset_x,
                          offset_y, mirror_x, mirror_y, swap_xy) {
-        // CO5300 MADCTL: clear MX/MY so the panel is not rotated 180 degrees.
-        // Touch orientation is configured independently in InitializeTouch().
-        const uint32_t command = (0x36U << 8) | (0x02U << 24);
-        const uint8_t rotation = 0x00;
-        ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(io_handle, command, &rotation, 1));
+        // Panel orientation is configured by lvgl_port from DISPLAY_MIRROR_X/Y.
+        // Do not write MADCTL directly here: it would override the driver's setting.
     }
 
     // EchoEarDisplay::SetupUI() builds the actual EchoEar home screen, settings,
