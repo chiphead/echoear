@@ -43,9 +43,10 @@ public:
                       bool mirror_x, bool mirror_y, bool swap_xy)
         : EchoEarDisplay(io_handle, panel_handle, width, height, offset_x,
                          offset_y, mirror_x, mirror_y, swap_xy) {
-        // Keep the panel's hardware orientation used by the working 1.32 port.
+        // CO5300 MADCTL: clear MX/MY so the panel is not rotated 180 degrees.
+        // Touch orientation is configured independently in InitializeTouch().
         const uint32_t command = (0x36U << 8) | (0x02U << 24);
-        const uint8_t rotation = 0xC0;
+        const uint8_t rotation = 0x00;
         ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(io_handle, command, &rotation, 1));
     }
 
