@@ -206,6 +206,19 @@ esp_err_t DlnaMediaServer::ServeRequest(httpd_req_t* request) {
     }
 
     const size_t length = last - first + 1;
+    if (request->method == HTTP_HEAD) {
+        std::string content_range;
+        if (partial) {
+            content_range = "bytes " + std::to_string(first) + "-" +
+                            std::to_string(last) + "/" + std::to_string(wav_size_);
+        }
+        return SendHeadResponse(request,
+                                partial ? "206 Partial Content" : "200 OK",
+                                "audio/wav", length,
+                                partial ? content_range.c_str() : nullptr,
+                                true);
+    }
+
     httpd_resp_set_type(request, "audio/wav");
     httpd_resp_set_hdr(request, "Accept-Ranges", "bytes");
     if (partial) {
@@ -214,16 +227,6 @@ esp_err_t DlnaMediaServer::ServeRequest(httpd_req_t* request) {
             "bytes " + std::to_string(first) + "-" + std::to_string(last) +
             "/" + std::to_string(wav_size_);
         httpd_resp_set_hdr(request, "Content-Range", content_range.c_str());
-    }
-
-    if (request->method == HTTP_HEAD) {
-        return SendHeadResponse(request,
-                                partial ? "206 Partial Content" : "200 OK",
-                                "audio/wav", length,
-                                partial ? ("bytes " + std::to_string(first) + "-" +
-                                           std::to_string(last) + "/" +
-                                           std::to_string(wav_size_)).c_str() : nullptr,
-                                true);
     }
 
     const esp_err_t result = httpd_resp_send(
