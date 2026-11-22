@@ -1,9 +1,5 @@
 # Define source files
 set(SOURCES "audio/audio_codec.cc"
-            "audio/dlna/dlna_discovery.cc"
-            "audio/dlna/dlna_device_description.cc"
-            "audio/dlna/dlna_control.cc"
-            "audio/dlna/dlna_media_server.cc"
             "audio/audio_debugger.cc"
             "audio/audio_service.cc"
             "audio/demuxer/ogg_demuxer.cc"
@@ -46,6 +42,16 @@ set(SOURCES "audio/audio_codec.cc"
             "assets.cc"
             "main.cc"
             )
+
+# Keep the experimental Sony DLNA transport isolated to its target board.
+if(CONFIG_BOARD_TYPE_ECHOEAR_WAVESHARE_1_32)
+    list(APPEND SOURCES
+        "audio/dlna/dlna_discovery.cc"
+        "audio/dlna/dlna_device_description.cc"
+        "audio/dlna/dlna_control.cc"
+        "audio/dlna/dlna_media_server.cc"
+    )
+endif()
 
 set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "audio/dlna" "audio/demuxer" "protocols")
 
