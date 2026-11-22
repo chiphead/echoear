@@ -14,7 +14,7 @@ This feature branch adds a staged DLNA output path for the Waveshare ESP32-S3-To
 
 1. **SSDP discovery** — send an IPv4 M-SEARCH for UPnP MediaRenderer devices and collect unique LOCATION/USN/SERVER responses. Implemented in `main/audio/dlna/dlna_discovery.*`.
 2. **Renderer description** — implemented in `main/audio/dlna/dlna_device_description.*`. Fetch LOCATION over HTTP, extract FriendlyName/Manufacturer/ModelName/UDN, and resolve the AVTransport service type and control URL. The response is bounded to 24 KiB.
-3. **Media HTTP endpoint** — serve a bounded WAV/PCM resource with correct content type, content length, and HTTP Range behavior required by the renderer.
+3. **Media HTTP endpoint** — `DlnaMediaServer` now serves one immutable WAV buffer over HTTP, supports GET/HEAD and single-byte-range requests, and returns `audio/wav`. The caller must keep the buffer alive and unchanged until the server stops.
 4. **AVTransport control** — `DlnaControl` sends `SetAVTransportURI`, `Play`, and `Stop` SOAP actions with bounded response capture and XML-escaped DIDL-Lite metadata. Calls are blocking and must run in a worker task; renderer state/event subscription remains pending.
 5. **Audio sink integration** — add a non-blocking sink interface after PCM decode; preserve LocalSink as the default.
 6. **TTS lifecycle and UX** — buffer/stream decoded PCM, handle interruption, playback completion, Wi-Fi loss, and microphone/AEC policy.
@@ -25,6 +25,6 @@ This feature branch adds a staged DLNA output path for the Waveshare ESP32-S3-To
 
 ## Current limitations
 
-- SSDP discovery, UPnP device-description parsing, and a first AVTransport SOAP control client are implemented. SOAP control is not yet validated against a physical renderer; the HTTP media server and audio sink routing remain unimplemented.
+- SSDP discovery, UPnP device-description parsing, and a first AVTransport SOAP control client are implemented. SOAP control is not yet validated against a physical renderer; the audio sink routing remains unimplemented. The HTTP endpoint is implemented but not yet tested against the SRS-X88.
 - No compile or hardware validation has been performed as part of this initial commit.
 - The Sony SRS-X88 must be on the same LAN/VLAN and have network standby / network control enabled as applicable.
