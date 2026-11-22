@@ -128,7 +128,8 @@ esp_err_t DlnaMediaServer::HandleRequest(httpd_req_t* request) {
 
 esp_err_t DlnaMediaServer::ServeRequest(httpd_req_t* request) {
     if (wav_data_ == nullptr || wav_size_ == 0) {
-        httpd_resp_send_err(request, HTTPD_503_SERVICE_UNAVAILABLE, "No audio resource");
+        httpd_resp_set_status(request, "503 Service Unavailable");
+        httpd_resp_send(request, "No audio resource", HTTPD_RESP_USE_STRLEN);
         return ESP_OK;
     }
 
