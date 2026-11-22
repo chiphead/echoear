@@ -86,8 +86,8 @@ void Run(std::string host) {
     const bool accepted = DlnaControl::SetUriAndPlay(
         *sony, server.GetMediaUri(), "EchoEar Sony X88 DLNA test", 8000);
     if (accepted) {
-        ESP_LOGI(kTag, "SOAP Play accepted; media endpoint stays alive for 6 seconds");
-        vTaskDelay(pdMS_TO_TICKS(6000));
+        ESP_LOGI(kTag, "SOAP Play accepted; media endpoint stays alive for 15 seconds");
+        vTaskDelay(pdMS_TO_TICKS(15000));
         DlnaControl::Stop(*sony, 5000);
     } else {
         ESP_LOGE(kTag, "SetURI/Play failed or was rejected");
