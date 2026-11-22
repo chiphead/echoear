@@ -29,6 +29,35 @@ bool ParseSize(const std::string& text, size_t& value) {
     return true;
 }
 
+esp_err_t SendHeadResponse(httpd_req_t* request, const char* status,
+                           const char* content_type, size_t content_length,
+                           const char* content_range = nullptr,
+                           bool accept_ranges = false) {
+    std::string headers = "HTTP/1.1 ";
+    headers += status;
+    headers += "\r\nContent-Type: ";
+    headers += content_type;
+    headers += "\r\nContent-Length: ";
+    headers += std::to_string(content_length);
+    headers += "\r\n";
+    if (accept_ranges) headers += "Accept-Ranges: bytes\r\n";
+    if (content_range != nullptr) {
+        headers += "Content-Range: ";
+        headers += content_range;
+        headers += "\r\n";
+    }
+    headers += "\r\n";
+
+    size_t sent_total = 0;
+    while (sent_total < headers.size()) {
+        const int sent = httpd_send(request, headers.data() + sent_total,
+                                    headers.size() - sent_total);
+        if (sent <= 0) return ESP_FAIL;
+        sent_total += static_cast<size_t>(sent);
+    }
+    return ESP_OK;
+}
+
 bool ParseRange(const std::string& header, size_t total,
                 size_t& first, size_t& last) {
     if (header.compare(0, 6, "bytes=") != 0 || header.find(',') != std::string::npos ||
@@ -134,9 +163,12 @@ esp_err_t DlnaMediaServer::HandleRequest(httpd_req_t* request) {
 
 esp_err_t DlnaMediaServer::ServeRequest(httpd_req_t* request) {
     if (wav_data_ == nullptr || wav_size_ == 0) {
+        if (request->method == HTTP_HEAD) {
+            return SendHeadResponse(request, "503 Service Unavailable",
+                                    "text/plain", sizeof("No audio resource") - 1);
+        }
         httpd_resp_set_status(request, "503 Service Unavailable");
-        httpd_resp_send(request, "No audio resource", HTTPD_RESP_USE_STRLEN);
-        return ESP_OK;
+        return httpd_resp_send(request, "No audio resource", HTTPD_RESP_USE_STRLEN);
     }
 
     size_t first = 0;
@@ -148,11 +180,15 @@ esp_err_t DlnaMediaServer::ServeRequest(httpd_req_t* request) {
         std::string range(range_len + 1, '\0');
         if (httpd_req_get_hdr_value_str(request, "Range", range.data(),
                                         range.size()) != ESP_OK) {
-            httpd_resp_set_status(request, "416 Range Not Satisfiable");
             const std::string content_range = "bytes */" + std::to_string(wav_size_);
+            if (request->method == HTTP_HEAD) {
+                return SendHeadResponse(request, "416 Range Not Satisfiable",
+                                        "text/plain", sizeof("Invalid Range") - 1,
+                                        content_range.c_str());
+            }
+            httpd_resp_set_status(request, "416 Range Not Satisfiable");
             httpd_resp_set_hdr(request, "Content-Range", content_range.c_str());
-            httpd_resp_send(request, "Invalid Range", HTTPD_RESP_USE_STRLEN);
-            return ESP_OK;
+            return httpd_resp_send(request, "Invalid Range", HTTPD_RESP_USE_STRLEN);
         }
         range.resize(std::char_traits<char>::length(range.c_str()));
         if (!ParseRange(range, wav_size_, first, last)) {
@@ -176,8 +212,19 @@ esp_err_t DlnaMediaServer::ServeRequest(httpd_req_t* request) {
         httpd_resp_set_hdr(request, "Content-Range", content_range.c_str());
     }
 
+    if (request->method == HTTP_HEAD) {
+        return SendHeadResponse(request,
+                                partial ? "206 Partial Content" : "200 OK",
+                                "audio/wav", length,
+                                partial ? ("bytes " + std::to_string(first) + "-" +
+                                           std::to_string(last) + "/" +
+                                           std::to_string(wav_size_)).c_str() : nullptr,
+                                true);
+    }
+
     const esp_err_t result = httpd_resp_send(
-        request, reinterpret_cast<const char*>(wav_data_ + first), length);
+        request, reinterpret_cast<const char*>(wav_data_ + first),
+        static_cast<ssize_t>(length));
     if (result != ESP_OK) {
         ESP_LOGW(kTag, "Failed to send media bytes %u..%u",
                  static_cast<unsigned>(first), static_cast<unsigned>(last));
