@@ -192,11 +192,15 @@ esp_err_t DlnaMediaServer::ServeRequest(httpd_req_t* request) {
         }
         range.resize(std::char_traits<char>::length(range.c_str()));
         if (!ParseRange(range, wav_size_, first, last)) {
-            httpd_resp_set_status(request, "416 Range Not Satisfiable");
             const std::string content_range = "bytes */" + std::to_string(wav_size_);
+            if (request->method == HTTP_HEAD) {
+                return SendHeadResponse(request, "416 Range Not Satisfiable",
+                                        "text/plain", sizeof("Invalid Range") - 1,
+                                        content_range.c_str());
+            }
+            httpd_resp_set_status(request, "416 Range Not Satisfiable");
             httpd_resp_set_hdr(request, "Content-Range", content_range.c_str());
-            httpd_resp_send(request, "Invalid Range", HTTPD_RESP_USE_STRLEN);
-            return ESP_OK;
+            return httpd_resp_send(request, "Invalid Range", HTTPD_RESP_USE_STRLEN);
         }
         partial = true;
     }
