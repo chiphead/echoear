@@ -14,7 +14,7 @@
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "IDF_TARGET": "esp32s3",
-        "SDKCONFIG": "${sourceDir}/build/sdkconfig",
+        "SDKCONFIG": "${sourceDir}/sdkconfig",
         "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.defaults.echoear-waveshare-1.32"
       }
     }
