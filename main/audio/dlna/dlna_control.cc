@@ -1,5 +1,6 @@
 #include "dlna_control.h"
 
+#include <algorithm>
 #include <string>
 
 #include <esp_http_client.h>
