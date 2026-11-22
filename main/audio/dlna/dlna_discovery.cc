@@ -70,7 +70,7 @@ bool DlnaDiscovery::Discover(uint32_t timeout_ms, std::vector<DlnaRenderer>& ren
     if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout,
                    sizeof(receive_timeout)) < 0) {
         ESP_LOGE(kTag, "Failed to set SSDP receive timeout: errno=%d", errno);
-        closesocket(socket_fd);
+        close(socket_fd);
         return false;
     }
 
@@ -83,7 +83,7 @@ bool DlnaDiscovery::Discover(uint32_t timeout_ms, std::vector<DlnaRenderer>& ren
                             reinterpret_cast<sockaddr*>(&destination), sizeof(destination));
     if (sent != static_cast<int>(sizeof(kSearchRequest) - 1)) {
         ESP_LOGE(kTag, "Failed to send SSDP M-SEARCH: errno=%d", errno);
-        closesocket(socket_fd);
+        close(socket_fd);
         return false;
     }
 
@@ -117,7 +117,7 @@ bool DlnaDiscovery::Discover(uint32_t timeout_ms, std::vector<DlnaRenderer>& ren
                 continue;
             }
             ESP_LOGE(kTag, "SSDP select failed: errno=%d", errno);
-            closesocket(socket_fd);
+            close(socket_fd);
             return false;
         }
 
@@ -130,7 +130,7 @@ bool DlnaDiscovery::Discover(uint32_t timeout_ms, std::vector<DlnaRenderer>& ren
                 continue;
             }
             ESP_LOGE(kTag, "SSDP receive failed: errno=%d", errno);
-            closesocket(socket_fd);
+            close(socket_fd);
             return false;
         }
 
@@ -162,7 +162,7 @@ bool DlnaDiscovery::Discover(uint32_t timeout_ms, std::vector<DlnaRenderer>& ren
         renderers.push_back(std::move(renderer));
     }
 
-    closesocket(socket_fd);
+    close(socket_fd);
     ESP_LOGI(kTag, "SSDP discovery finished: %u renderer(s)",
              static_cast<unsigned>(renderers.size()));
     return true;
