@@ -81,21 +81,40 @@ std::string Element(const std::string& xml, const char* local_name, size_t from 
     return {};
 }
 
-std::string ResolveUrl(const std::string& base, const std::string& control) {
-    if (control.empty()) return {};
-    if (control.compare(0, 7, "http://") == 0 || control.compare(0, 8, "https://") == 0) {
-        return control;
+std::string ResolveUrl(const std::string& base, const std::string& reference) {
+    if (reference.empty()) return {};
+    if (reference.compare(0, 7, "http://") == 0 ||
+        reference.compare(0, 8, "https://") == 0) {
+        return reference;
     }
+
     const size_t scheme = base.find("://");
     if (scheme == std::string::npos) return {};
-    const size_t authority_end = base.find('/', scheme + 3);
-    const std::string origin = authority_end == std::string::npos ? base : base.substr(0, authority_end);
-    if (control[0] == '/') return origin + control;
+    const size_t authority_start = scheme + 3;
+    const size_t path_start = base.find('/', authority_start);
+    const std::string origin = path_start == std::string::npos
+        ? base : base.substr(0, path_start);
 
-    const size_t query = base.find_first_of("?#");
-    const std::string clean_base = query == std::string::npos ? base : base.substr(0, query);
-    const size_t slash = clean_base.rfind('/');
-    return (slash == std::string::npos ? clean_base + "/" : clean_base.substr(0, slash + 1)) + control;
+    if (reference[0] == '/') return origin + reference;
+    if (reference[0] == '?') {
+        const size_t query = base.find_first_of("?#");
+        return (query == std::string::npos ? base : base.substr(0, query)) + reference;
+    }
+
+    const size_t suffix = base.find_first_of("?#");
+    const std::string clean_base = suffix == std::string::npos
+        ? base : base.substr(0, suffix);
+    std::string directory;
+    if (clean_base.size() <= origin.size()) {
+        directory = origin + "/";
+    } else if (clean_base.back() == '/') {
+        directory = clean_base;
+    } else {
+        const size_t slash = clean_base.rfind('/');
+        directory = slash == std::string::npos
+            ? origin + "/" : clean_base.substr(0, slash + 1);
+    }
+    return directory + reference;
 }
 } // namespace
 
@@ -150,8 +169,11 @@ bool DlnaDeviceDescription::FetchAndParse(DlnaRenderer& renderer, uint32_t timeo
         const std::string service_type = Element(service, "serviceType");
         if (service_type.find("AVTransport") != std::string::npos) {
             renderer.av_transport_service_type = service_type;
+            const std::string url_base = Element(body.data, "URLBase");
+            const std::string resolved_base = url_base.empty()
+                ? renderer.location : ResolveUrl(renderer.location, url_base);
             renderer.av_transport_control_url = ResolveUrl(
-                renderer.location, Element(service, "controlURL"));
+                resolved_base, Element(service, "controlURL"));
             break;
         }
         service_pos = service_end + std::strlen("</service>");
