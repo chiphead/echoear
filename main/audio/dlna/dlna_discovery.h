@@ -24,7 +24,7 @@ public:
      * Search the local IPv4 network for UPnP MediaRenderer devices.
      *
      * @param timeout_ms Total discovery window. Values below 1000 ms are
-     *                   clamped to 1000 ms.
+     *                   clamped to 2500 ms to cover the SSDP MX response window.
      * @param renderers  Replaced with the unique renderers discovered.
      * @return true when the SSDP exchange completed, even if no renderer
      *         responded; false on socket or send/receive setup errors.
