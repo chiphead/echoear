@@ -2,6 +2,7 @@
 set(SOURCES "audio/audio_codec.cc"
             "audio/dlna/dlna_discovery.cc"
             "audio/dlna/dlna_device_description.cc"
+            "audio/dlna/dlna_control.cc"
             "audio/audio_debugger.cc"
             "audio/audio_service.cc"
             "audio/demuxer/ogg_demuxer.cc"
