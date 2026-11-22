@@ -162,6 +162,9 @@ esp_err_t DlnaMediaServer::HandleRequest(httpd_req_t* request) {
 }
 
 esp_err_t DlnaMediaServer::ServeRequest(httpd_req_t* request) {
+    const char* method = request->method == HTTP_HEAD ? "HEAD" : "GET";
+    ESP_LOGI(kTag, "Renderer requested %s %s", method, kMediaPath);
+
     if (wav_data_ == nullptr || wav_size_ == 0) {
         if (request->method == HTTP_HEAD) {
             return SendHeadResponse(request, "503 Service Unavailable",
@@ -235,6 +238,9 @@ esp_err_t DlnaMediaServer::ServeRequest(httpd_req_t* request) {
     if (result != ESP_OK) {
         ESP_LOGW(kTag, "Failed to send media bytes %u..%u",
                  static_cast<unsigned>(first), static_cast<unsigned>(last));
+    } else {
+        ESP_LOGI(kTag, "Served %u byte(s), range=%s",
+                 static_cast<unsigned>(length), partial ? "partial" : "full");
     }
     return result;
 }
