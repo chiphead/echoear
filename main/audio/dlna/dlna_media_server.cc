@@ -92,14 +92,7 @@ bool DlnaMediaServer::Start(const std::string& host_ipv4, const uint8_t* wav_dat
     get_uri.handler = HandleRequest;
     get_uri.user_ctx = this;
 
-    httpd_uri_t head_uri{};
-    head_uri.uri = kMediaPath;
-    head_uri.method = HTTP_HEAD;
-    head_uri.handler = HandleRequest;
-    head_uri.user_ctx = this;
-
-    if (httpd_register_uri_handler(server_, &get_uri) != ESP_OK ||
-        httpd_register_uri_handler(server_, &head_uri) != ESP_OK) {
+    if (httpd_register_uri_handler(server_, &get_uri) != ESP_OK) {
         ESP_LOGE(kTag, "Failed to register media URI handlers");
         Stop();
         return false;
@@ -168,13 +161,6 @@ esp_err_t DlnaMediaServer::ServeRequest(httpd_req_t* request) {
             "bytes " + std::to_string(first) + "-" + std::to_string(last) +
             "/" + std::to_string(wav_size_);
         httpd_resp_set_hdr(request, "Content-Range", content_range.c_str());
-    }
-
-    if (request->method == HTTP_HEAD) {
-        const std::string content_length = std::to_string(length);
-        httpd_resp_set_hdr(request, "Content-Length", content_length.c_str());
-        httpd_resp_send(request, "", 0);
-        return ESP_OK;
     }
 
     const esp_err_t result = httpd_resp_send(
