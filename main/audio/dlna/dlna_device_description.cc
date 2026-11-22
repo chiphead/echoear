@@ -134,7 +134,17 @@ bool DlnaDeviceDescription::FetchAndParse(DlnaRenderer& renderer, uint32_t timeo
 
     size_t service_pos = 0;
     while ((service_pos = body.data.find("<service", service_pos)) != std::string::npos) {
-        const size_t service_end = body.data.find("</service>", service_pos);
+        // Do not mistake the enclosing <serviceList> element for a <service> entry.
+        const size_t name_end = service_pos + std::strlen("<service");
+        if (name_end < body.data.size() &&
+            (std::isalnum(static_cast<unsigned char>(body.data[name_end])) ||
+             body.data[name_end] == '_' || body.data[name_end] == ':' ||
+             body.data[name_end] == '-')) {
+            service_pos = name_end;
+            continue;
+        }
+
+        const size_t service_end = body.data.find("</service>", name_end);
         if (service_end == std::string::npos) break;
         const std::string service = body.data.substr(service_pos, service_end - service_pos);
         const std::string service_type = Element(service, "serviceType");
@@ -144,7 +154,7 @@ bool DlnaDeviceDescription::FetchAndParse(DlnaRenderer& renderer, uint32_t timeo
                 renderer.location, Element(service, "controlURL"));
             break;
         }
-        service_pos = service_end + 10;
+        service_pos = service_end + std::strlen("</service>");
     }
 
     if (renderer.av_transport_service_type.empty() ||
