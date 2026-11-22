@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cerrno>
 #include <utility>
+#include <unistd.h>
 
 #include <esp_timer.h>
 
@@ -135,8 +136,11 @@ bool DlnaDiscovery::Discover(uint32_t timeout_ms, std::vector<DlnaRenderer>& ren
         }
 
         const std::string response(buffer.data(), static_cast<size_t>(received));
+        const std::string search_target = Lower(HeaderValue(response, "ST"));
         const std::string location = HeaderValue(response, "LOCATION");
-        if (location.empty()) {
+        if (location.empty() ||
+            search_target.find("urn:schemas-upnp-org:device:mediarenderer") ==
+                std::string::npos) {
             continue;
         }
 
