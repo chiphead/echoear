@@ -26,5 +26,5 @@ This feature branch adds a staged DLNA output path for the Waveshare ESP32-S3-To
 ## Current limitations
 
 - SSDP discovery, UPnP device-description parsing, and a first AVTransport SOAP control client are implemented. SOAP control is not yet validated against a physical renderer; the audio sink routing remains unimplemented. The HTTP endpoint is implemented but not yet tested against the SRS-X88.
-- No compile or hardware validation has been performed as part of this initial commit.
+- These modules have not yet been compiled with the project's ESP-IDF 6.1.x environment or validated on hardware.
 - The Sony SRS-X88 must be on the same LAN/VLAN and have network standby / network control enabled as applicable.
