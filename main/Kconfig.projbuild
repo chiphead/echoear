@@ -1178,3 +1178,12 @@ config ECHOEAR_UI_REVIEW
     help
         Temporarily navigates UI pages and prints JPEG snapshots as hex to serial.
         Disable for normal releases.
+
+config DLNA_SONY_X88_SMOKE_TEST
+    bool "Run Sony SRS-X88 DLNA WAV smoke test after Wi-Fi connects"
+    depends on BOARD_TYPE_ECHOEAR_WAVESHARE_1_32
+    default n
+    help
+        Starts a one-shot worker after Wi-Fi connects. It discovers a Sony SRS-X88,
+        serves a generated 2-second WAV file, and issues AVTransport Play/Stop.
+        This diagnostic does not route EchoEar TTS audio to DLNA.
