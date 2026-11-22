@@ -91,7 +91,7 @@ bool DlnaDiscovery::Discover(uint32_t timeout_ms, std::vector<DlnaRenderer>& ren
     ESP_LOGI(kTag, "SSDP M-SEARCH sent; waiting up to %lu ms",
              static_cast<unsigned long>(timeout_ms));
 
-    const uint32_t wait_ms = std::max<uint32_t>(timeout_ms, 1000);
+    const uint32_t wait_ms = std::max<uint32_t>(timeout_ms, 2500);
     const int64_t deadline_us = esp_timer_get_time() +
                                 static_cast<int64_t>(wait_ms) * 1000;
     std::array<char, 2048> buffer{};
