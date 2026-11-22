@@ -23,6 +23,22 @@ This feature branch adds a staged DLNA output path for the Waveshare ESP32-S3-To
 
 `DlnaDiscovery::Discover(timeout_ms, renderers)` performs a synchronous SSDP search. Call it from a worker task, never from the audio output task or UI thread. A successful return means the SSDP exchange completed; an empty result means no renderer answered within the discovery window. Then call `DlnaDeviceDescription::FetchAndParse(renderer, timeout_ms)` for each candidate. It performs blocking HTTP I/O and fills the device identity plus AVTransport service/control URL.
 
+## Standalone transport smoke-test flow
+
+The control and media-server classes are deliberately independent of `AudioService`. A worker task can exercise them in this order:
+
+```cpp
+DlnaMediaServer media;
+if (media.Start(board_ipv4, wav_data, wav_size)) {
+    if (DlnaControl::SetUriAndPlay(renderer, media.GetMediaUri(), "EchoEar test")) {
+        // Wait for the renderer to finish or call DlnaControl::Stop(renderer).
+    }
+    media.Stop();
+}
+```
+
+The `wav_data` buffer must remain valid and unchanged until `media.Stop()` returns. The example assumes the renderer has already been discovered and its device description parsed. It is a transport smoke-test path, not yet wired to TTS playback.
+
 ## Current limitations
 
 - SSDP discovery, UPnP device-description parsing, and a first AVTransport SOAP control client are implemented. SOAP control is not yet validated against a physical renderer; the audio sink routing remains unimplemented. The HTTP endpoint is implemented but not yet tested against the SRS-X88.
