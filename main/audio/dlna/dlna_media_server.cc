@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cctype>
 #include <cstdlib>
 #include <string>
 
@@ -12,7 +13,10 @@ constexpr char kTag[] = "DlnaMediaServer";
 constexpr char kMediaPath[] = "/dlna/audio.wav";
 
 bool ParseSize(const std::string& text, size_t& value) {
-    if (text.empty()) return false;
+    if (text.empty() || !std::all_of(text.begin(), text.end(),
+                                    [](unsigned char c) { return c >= '0' && c <= '9'; })) {
+        return false;
+    }
     errno = 0;
     char* end = nullptr;
     const unsigned long long parsed = std::strtoull(text.c_str(), &end, 10);
