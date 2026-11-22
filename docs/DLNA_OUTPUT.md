@@ -47,7 +47,7 @@ The worker searches specifically for an identity containing `SRS-X88`; it will
 not send playback commands to another renderer. It generates a 2-second,
 44.1 kHz / 16-bit / stereo PCM sine-wave WAV in heap memory, serves it over HTTP,
 then issues AVTransport `SetAVTransportURI` and `Play`. The media server remains
-available for six seconds before a best-effort `Stop` and cleanup.
+available for 15 seconds before a best-effort `Stop` and cleanup.
 
 The option defaults to disabled. It is intended only for transport diagnostics.
 A successful SOAP response means the renderer accepted the control request; it
