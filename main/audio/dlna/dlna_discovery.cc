@@ -4,6 +4,10 @@
 #include <array>
 #include <cctype>
 #include <cstring>
+#include <cerrno>
+#include <utility>
+
+#include <esp_timer.h>
 
 #include <esp_log.h>
 #include <lwip/inet.h>
