@@ -99,11 +99,14 @@ bool Invoke(const DlnaRenderer& renderer, const char* action,
                             response.body.find("<Fault") != std::string::npos;
     if (request_result != ESP_OK || status < 200 || status >= 300 ||
         response.overflow || soap_fault) {
+        constexpr int kMaxLoggedResponse = 256;
+        const int logged_length = static_cast<int>(
+            std::min(response.body.size(), static_cast<size_t>(kMaxLoggedResponse)));
         ESP_LOGW(kTag,
-                 "%s failed: err=%s HTTP=%d response_bytes=%u overflow=%d fault=%d",
+                 "%s failed: err=%s HTTP=%d response_bytes=%u overflow=%d fault=%d body=%.*s",
                  action, esp_err_to_name(request_result), status,
                  static_cast<unsigned>(response.body.size()), response.overflow,
-                 soap_fault);
+                 soap_fault, logged_length, response.body.c_str());
         return false;
     }
 
