@@ -66,7 +66,8 @@ DlnaMediaServer::~DlnaMediaServer() {
 bool DlnaMediaServer::Start(const std::string& host_ipv4, const uint8_t* wav_data,
                             size_t wav_size, uint16_t port) {
     if (server_ != nullptr || host_ipv4.empty() || wav_data == nullptr ||
-        wav_size < 44 || port == 0) {
+        wav_size < 44 || port == 0 || port == UINT16_MAX ||
+        wav_size > static_cast<size_t>(INT_MAX)) {
         ESP_LOGE(kTag, "Invalid start parameters or server already running");
         return false;
     }
@@ -93,7 +94,18 @@ bool DlnaMediaServer::Start(const std::string& host_ipv4, const uint8_t* wav_dat
     get_uri.user_ctx = this;
 
     if (httpd_register_uri_handler(server_, &get_uri) != ESP_OK) {
-        ESP_LOGE(kTag, "Failed to register media URI handlers");
+        ESP_LOGE(kTag, "Failed to register media GET handler");
+        Stop();
+        return false;
+    }
+
+    httpd_uri_t head_uri{};
+    head_uri.uri = kMediaPath;
+    head_uri.method = HTTP_HEAD;
+    head_uri.handler = HandleRequest;
+    head_uri.user_ctx = this;
+    if (httpd_register_uri_handler(server_, &head_uri) != ESP_OK) {
+        ESP_LOGE(kTag, "Failed to register media HEAD handler");
         Stop();
         return false;
     }
