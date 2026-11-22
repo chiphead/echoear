@@ -11,7 +11,7 @@
       "displayName": "EchoEar - Waveshare AMOLED 1.32 (8MB, no OTA)",
       "description": "ESP32-S3-Touch-AMOLED-1.32 with EchoEar UI, Chinese language, and a single factory app partition.",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build",
+      "binaryDir": "build",
       "cacheVariables": {
         "IDF_TARGET": "esp32s3",
         "SDKCONFIG": "${sourceDir}/sdkconfig.echoear-waveshare-1.32",
