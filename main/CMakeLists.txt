@@ -3,6 +3,7 @@ set(SOURCES "audio/audio_codec.cc"
             "audio/dlna/dlna_discovery.cc"
             "audio/dlna/dlna_device_description.cc"
             "audio/dlna/dlna_control.cc"
+            "audio/dlna/dlna_media_server.cc"
             "audio/audio_debugger.cc"
             "audio/audio_service.cc"
             "audio/demuxer/ogg_demuxer.cc"
@@ -1137,6 +1138,7 @@ idf_component_register(SRCS ${SOURCES}
                         esp_netif
                         lwip
                         esp_http_client
+                        esp_http_server
                         esp_eth
                         esp_driver_gpio
                         esp_driver_uart
