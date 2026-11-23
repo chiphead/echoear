@@ -416,6 +416,19 @@ elseif(CONFIG_BOARD_TYPE_ECHOEAR_WAVESHARE_1_32)
     set(BUILTIN_TEXT_FONT font_noto_sans_basic_20_4)
     set(BUILTIN_ICON_FONT font_material_symbols_20_4)
     set(DEFAULT_EMOJI_COLLECTION noto-color-emoji_32)
+    # Fetch the pinned upstream release and extract only the original eye GIFs.
+    # The release's 1.75B firmware and partition table are never used.
+    set(DEFAULT_ASSETS_EXTRA_FILES "${CMAKE_BINARY_DIR}/echoear-waveshare-1.32-eye-assets")
+    execute_process(
+        COMMAND python "${CMAKE_CURRENT_LIST_DIR}/../scripts/prepare_echoear_eye_assets.py"
+                --output-dir "${DEFAULT_ASSETS_EXTRA_FILES}"
+                --cache-dir "${CMAKE_BINARY_DIR}/echoear-upstream-cache"
+        RESULT_VARIABLE ECHOEAR_EYE_ASSETS_RESULT
+    )
+    if(NOT ECHOEAR_EYE_ASSETS_RESULT EQUAL 0)
+        message(FATAL_ERROR
+            "Failed to prepare EchoEar eye GIF assets. Check network access and rerun idf.py reconfigure.")
+    endif()
 elseif(CONFIG_BOARD_TYPE_WAVESHARE_ESP32_S3_TOUCH_AMOLED_1_75)
     set(BOARD_DIR "waveshare/esp32-s3-touch-amoled-1.75")
     set(BUILTIN_TEXT_FONT font_noto_sans_basic_30_4)
