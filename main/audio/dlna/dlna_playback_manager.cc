@@ -43,9 +43,21 @@ DlnaPlaybackManager::~DlnaPlaybackManager() {
 
 bool DlnaPlaybackManager::Start(const std::string& host_ipv4) {
     if (host_ipv4.empty()) return false;
-    if (worker_task_ != nullptr) return true;
+    if (worker_task_ != nullptr) {
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            host_ipv4_ = host_ipv4;
+        }
+        network_available_.store(true);
+        network_lost_.store(true);
+        return true;
+    }
 
-    host_ipv4_ = host_ipv4;
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        host_ipv4_ = host_ipv4;
+    }
+    network_available_.store(true);
     for (size_t i = 0; i < kBufferCount; ++i) {
         if (!buffers_[i].Initialize()) {
             ESP_LOGE(kTag, "PCM buffer %u initialization failed", static_cast<unsigned>(i));
@@ -69,6 +81,12 @@ bool DlnaPlaybackManager::Start(const std::string& host_ipv4) {
     }
     ESP_LOGI(kTag, "DLNA output worker started; host=%s", host_ipv4_.c_str());
     return true;
+}
+
+void DlnaPlaybackManager::NotifyNetworkDisconnected() {
+    network_available_.store(false);
+    sink_ready_.store(false);
+    network_lost_.store(true);
 }
 
 bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
@@ -209,7 +227,12 @@ void DlnaPlaybackManager::ProcessResource(const Resource& resource) {
         current_wav_ = nullptr;
     }
 
-    if (!media_server_.Start(host_ipv4_, resource.wav_data, resource.wav_size)) {
+    std::string host;
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        host = host_ipv4_;
+    }
+    if (!media_server_.Start(host, resource.wav_data, resource.wav_size)) {
         heap_caps_free(resource.wav_data);
         ESP_LOGE(kTag, "Could not publish WAV resource");
         renderer_ready_ = false;
@@ -237,7 +260,22 @@ void DlnaPlaybackManager::ProcessResource(const Resource& resource) {
 void DlnaPlaybackManager::Worker() {
     TickType_t next_discovery = 0;
     while (true) {
-        if (!renderer_ready_ &&
+        if (network_lost_.exchange(false)) {
+            sink_ready_.store(false);
+            if (media_server_.IsRunning()) {
+                if (renderer_ready_) DlnaControl::Stop(renderer_, kControlTimeoutMs);
+                media_server_.Stop();
+            }
+            if (current_wav_ != nullptr) {
+                heap_caps_free(current_wav_);
+                current_wav_ = nullptr;
+            }
+            renderer_ready_ = false;
+            next_discovery = 0;
+            ESP_LOGI(kTag, "Network loss/reconnect: released active DLNA resource");
+        }
+
+        if (network_available_.load() && !renderer_ready_ &&
             (next_discovery == 0 || xTaskGetTickCount() >= next_discovery)) {
             renderer_ready_ = FindSonyRenderer(renderer_);
             sink_ready_.store(renderer_ready_);
@@ -264,7 +302,7 @@ void DlnaPlaybackManager::Worker() {
             }
 
             if (resource.wav_data != nullptr) {
-                if (renderer_ready_) {
+                if (network_available_.load() && renderer_ready_) {
                     ProcessResource(resource);
                 } else {
                     heap_caps_free(resource.wav_data);
