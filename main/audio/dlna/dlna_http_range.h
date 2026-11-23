@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 
