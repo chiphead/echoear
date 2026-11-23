@@ -45,7 +45,8 @@ bool DlnaPcmBuffer::Initialize() {
     if (pcm_data_ == nullptr) {
         allocated_in_psram = false;
         pcm_data_ = static_cast<uint8_t*>(
-            heap_caps_malloc(kWavHeaderSize + max_pcm_bytes_, MALLOC_CAP_8BIT));
+            heap_caps_malloc(kWavHeaderSize + max_pcm_bytes_,
+                             MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     }
     if (pcm_data_ == nullptr) {
         ESP_LOGE(kTag, "Unable to allocate %u-byte PCM buffer",
@@ -54,7 +55,7 @@ bool DlnaPcmBuffer::Initialize() {
     }
     ESP_LOGI(kTag, "Allocated %u-byte PCM buffer in %s",
              static_cast<unsigned>(kWavHeaderSize + max_pcm_bytes_),
-             allocated_in_psram ? "PSRAM" : "8-bit heap fallback");
+             allocated_in_psram ? "PSRAM" : "internal RAM fallback");
     return true;
 }
 
