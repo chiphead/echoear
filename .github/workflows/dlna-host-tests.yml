@@ -1,10 +1,25 @@
 name: DLNA Host Tests
 
 on:
+  push:
+    branches:
+      - feature/dlna-sony-x88-audio
+    paths:
+      - "main/audio/dlna/**"
+      - "scripts/tests/test_dlna_*.py"
+      - "main/CMakeLists.txt"
+      - "main/idf_component.yml"
+      - ".github/workflows/dlna-host-tests.yml"
   pull_request:
     branches:
       - main
       - feature/dlna-sony-x88-audio
+    paths:
+      - "main/audio/dlna/**"
+      - "scripts/tests/test_dlna_*.py"
+      - "main/CMakeLists.txt"
+      - "main/idf_component.yml"
+      - ".github/workflows/dlna-host-tests.yml"
   workflow_dispatch:
 
 permissions:
