@@ -61,13 +61,14 @@ private:
     int FindReadyBufferLocked(uint8_t after_index) const;
     bool InitializeResampler(int source_sample_rate, int channels);
 
-    // Three accumulators provide two queued look-ahead segments while the worker
-    // owns the currently playing immutable WAV resource.
+    // Three utterance-sized accumulators allow the worker to own the current WAV
+    // while subsequent complete utterances are buffered without fragmenting
+    // ordinary speech into independently initialized DLNA media items.
     static constexpr size_t kBufferCount = 3;
-    // Pass the segment capacity explicitly at the owning call site. This makes
-    // the runtime allocation independent of constructor default-argument
-    // propagation in incremental ESP-IDF builds.
-    static constexpr size_t kPcmSegmentBytes = 64 * 1024;
+    // Match the original 512 KiB utterance buffer. At 32 kHz mono PCM16 this
+    // holds about 8.2 seconds, so normal speech is published as one WAV.
+    // Longer utterances remain bounded and may use a second resource.
+    static constexpr size_t kPcmSegmentBytes = 512 * 1024;
     DlnaPcmBuffer buffers_[kBufferCount] = {
         DlnaPcmBuffer(kPcmSegmentBytes),
         DlnaPcmBuffer(kPcmSegmentBytes),
