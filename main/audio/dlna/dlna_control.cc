@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <string>
-#include <utility>
 
 #include <esp_http_client.h>
 #include <esp_log.h>
@@ -119,7 +118,7 @@ bool DlnaControl::SetUriAndPlay(const DlnaRenderer& renderer,
         "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" "
         "xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\">"
         "<item id=\"0\" parentID=\"-1\" restricted=\"1\">"
-        "<dc:title>" + XmlEscape(title.empty() ? "EchoEar audio" : title) + "</dc:title>"
+        "<dc:title>" + DlnaXml::Escape(title.empty() ? "EchoEar audio" : title) + "</dc:title>"
         "<upnp:class>object.item.audioItem.musicTrack</upnp:class>"
         "<res protocolInfo=\"http-get:*:audio/wav:*\">" +
         XmlEscape(media_uri) + "</res></item></DIDL-Lite>";
@@ -164,10 +163,6 @@ bool DlnaControl::Stop(const DlnaRenderer& renderer, uint32_t timeout_ms) {
     return Invoke(renderer, "Stop", "<InstanceID>0</InstanceID>", timeout_ms);
 }
 
-namespace {
-
-}  // namespace
-
 bool DlnaControl::GetCurrentUri(const DlnaRenderer& renderer,
                                 std::string& uri,
                                 uint32_t timeout_ms) {
@@ -194,7 +189,7 @@ bool DlnaControl::GetTransportState(const DlnaRenderer& renderer,
         return false;
     }
     std::string raw;
-    if (!ExtractXmlValue(response, "CurrentTransportState", raw)) {
+    if (!DlnaXml::ExtractValue(response, "CurrentTransportState", raw)) {
         state = DlnaTransportState::kUnknown;
         return false;
     }
