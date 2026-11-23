@@ -270,3 +270,11 @@ AVTransport SOAP escaping and response extraction now share the header-only `dln
 - The worker now refuses to start discovery while `network_lost_` is set, validates the session again after discovery returns, and clears `sink_ready_` if a disconnect raced with publishing that readiness result.
 - Resource dequeue also requires `!network_lost_` before entering `ProcessResource()`. Generation checks remain the final guard for resources queued before a disconnect.
 - This closes the stale-discovery readiness race at the worker boundary; it does not make the underlying HTTP requests cancellable. A disconnect during discovery is handled after the bounded request/discovery calls return.
+
+## Audio task shutdown and DLNA callback lifetime
+
+- AudioService::Stop() now wakes its input, output, and Opus tasks, then waits for an exit bit from every task successfully created by the current Start() call. The task wrappers publish their exit bit immediately before self-deletion; task-owned codec, callback, queue, and resampler state is not destroyed while task code can still access it.
+- Repeated Start() while already running is ignored. A subsequent start clears the previous generation's completion bits and resets task handles before creating a new task set.
+- AudioService calls Stop() from its destructor as a final safety net. Application::~Application() also stops AudioService explicitly while the DLNA manager and other callback targets are still alive, then clears the callbacks before member destruction. This matters because the application's PCM and playback callbacks capture this and can call DlnaPlaybackManager.
+- The stop wait is intentionally a join: if a codec driver or an in-flight output callback does not return, destruction waits rather than freeing memory underneath the task. This is safer than a timeout followed by use-after-free, but a permanently blocked hardware operation can consequently delay shutdown.
+- This change is based on static lifecycle analysis. It still requires compilation against the project's ESP-IDF 6.1 environment and a runtime stop/restart exercise.
