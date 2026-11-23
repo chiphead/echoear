@@ -26,7 +26,7 @@ Set `CONFIG_DLNA_AUDIO_OUTPUT=y` for the Waveshare ESP32-S3-Touch-AMOLED-1.32 ta
 
 When Wi-Fi connects, `Application` starts `DlnaPlaybackManager` with the station IP reported by `WifiManager`. A worker performs SSDP discovery and accepts only a renderer whose identity contains `SRS-X88`. Until the renderer is discovered, AudioService continues using the local ES8311 output.
 
-The manager installs the AudioService PCM callback for the complete decoded playback path. This includes server speech, `PlaySound()` prompt assets, and notification audio; there is no TTS-only routing filter. The callback only copies PCM into one of two bounded accumulators. The existing playback-drained callback finalizes the WAV header and queues the immutable resource. A dedicated worker owns discovery, HTTP media publication, and SOAP control.
+The manager installs the AudioService PCM callback for the complete decoded playback path. This includes server speech, `PlaySound()` prompt assets, and notification audio; there is no TTS-only routing filter. The callback only copies PCM into one of two bounded accumulators. The existing playback-drained callback finalizes the WAV header and queues the immutable resource. A dedicated worker owns discovery, HTTP media publication, and SOAP control. Queue saturation uses an independent recycle bitmask, so a failed resource enqueue cannot permanently strand a PCM accumulator. Worker teardown is cooperative: the worker stops AVTransport, shuts down its HTTP server, releases the active WAV, and signals completion before its owner releases the queue.
 
 The manager keeps the current WAV allocation alive while the renderer may fetch it. When a new utterance replaces the current one, it first sends best-effort AVTransport Stop, stops the old HTTP server, and only then releases the previous WAV allocation. Wi-Fi disconnect disables the sink and schedules server/resource cleanup; reconnect updates the host address and triggers rediscovery.
 
@@ -71,6 +71,6 @@ task and does not intercept TTS PCM or alter the local ES8311 audio path.
 ## Current limitations
 
 - SSDP discovery, UPnP device-description parsing, and a first AVTransport SOAP control client are implemented. SOAP control is not yet validated against a physical renderer; the audio sink routing remains unimplemented. The HTTP endpoint is implemented but not yet tested against the SRS-X88.
-- The DLNA modules and optional smoke-test worker have not yet been confirmed compiled with the project's ESP-IDF 6.1.x environment or validated on hardware.
-- TTS-to-DLNA routing is intentionally not part of the smoke test. The non-blocking PCM sink hook, bounded PCM-to-WAV buffer, and integrated playback manager are implemented. The manager routes all decoded playback sounds when enabled, while retaining local-output fallback. ESP-IDF 6.1.x compilation and physical SRS-X88 playback validation are still pending.
+- The DLNA modules, integrated playback manager, and optional smoke-test worker have not yet been confirmed compiled with the project's ESP-IDF 6.1.x environment or validated on hardware.
+- The integrated manager routes all decoded playback sounds when enabled, while retaining local-output fallback when the renderer is not ready at the start of an utterance. ESP-IDF 6.1.x compilation and physical SRS-X88 playback validation are still pending.
 - The Sony SRS-X88 must be on the same LAN/VLAN and have network standby / network control enabled as applicable.
