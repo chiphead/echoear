@@ -50,6 +50,8 @@ private:
     bool buffer_active_[kBufferCount] = {false, false};
     bool buffer_dropping_[kBufferCount] = {false, false};
     uint8_t write_buffer_index_ = 0;
+    bool utterance_decided_ = false;
+    bool fallback_utterance_ = false;
     std::mutex buffer_mutex_;
 
     QueueHandle_t resource_queue_ = nullptr;
