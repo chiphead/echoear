@@ -135,6 +135,11 @@ void DlnaPcmBuffer::Reset() {
     active_ = false;
 }
 
+size_t DlnaPcmBuffer::GetRemainingPcmBytes() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return active_ && pcm_size_ <= max_pcm_bytes_ ? max_pcm_bytes_ - pcm_size_ : 0;
+}
+
 size_t DlnaPcmBuffer::GetPcmBytes() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return pcm_size_;
