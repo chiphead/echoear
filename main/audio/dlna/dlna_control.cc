@@ -147,6 +147,32 @@ bool DlnaControl::SetUriAndPlay(const DlnaRenderer& renderer,
                   "<InstanceID>0</InstanceID><Speed>1</Speed>", timeout_ms);
 }
 
+bool DlnaControl::SetNextUri(const DlnaRenderer& renderer,
+                             const std::string& media_uri,
+                             const std::string& title,
+                             uint32_t timeout_ms) {
+    if (!renderer.supports_set_next_av_transport_uri || media_uri.empty()) {
+        ESP_LOGW(kTag, "Renderer does not advertise SetNextAVTransportURI");
+        return false;
+    }
+
+    const std::string metadata =
+        "<DIDL-Lite xmlns=\\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\\" "
+        "xmlns:dc=\\"http://purl.org/dc/elements/1.1/\\" "
+        "xmlns:upnp=\\"urn:schemas-upnp-org:metadata-1-0/upnp/\\">"
+        "<item id=\\"0\\" parentID=\\"-1\\" restricted=\\"1\\">"
+        "<dc:title>" + XmlEscape(title.empty() ? "EchoEar audio" : title) + "</dc:title>"
+        "<upnp:class>object.item.audioItem.musicTrack</upnp:class>"
+        "<res protocolInfo=\\"http-get:*:audio/wav:*\\">" +
+        XmlEscape(media_uri) + "</res></item></DIDL-Lite>";
+
+    const std::string arguments =
+        "<InstanceID>0</InstanceID><NextURI>" + XmlEscape(media_uri) +
+        "</NextURI><NextURIMetaData>" + XmlEscape(metadata) +
+        "</NextURIMetaData>";
+    return Invoke(renderer, "SetNextAVTransportURI", arguments, timeout_ms);
+}
+
 bool DlnaControl::Stop(const DlnaRenderer& renderer, uint32_t timeout_ms) {
     return Invoke(renderer, "Stop", "<InstanceID>0</InstanceID>", timeout_ms);
 }
