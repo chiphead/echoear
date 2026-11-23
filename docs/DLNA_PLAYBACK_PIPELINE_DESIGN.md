@@ -171,3 +171,11 @@ AVTransport SOAP escaping and response extraction now share the header-only `dln
 
 - Current and next AVTransport items now share one tested `BuildDidlMetadata()` implementation, preventing their DIDL-Lite serialization from drifting. Regression tests assert valid quoted XML attributes, no literal backslashes, and correct escaping of title and media URI.
 - If the playback watchdog expires without a confirmed STOPPED state and there is no next item to replace the current one, the manager explicitly sends Stop before retiring the last resource. If Stop itself fails, it disables the sink, stops the HTTP server, and retires the registry rather than silently assuming playback ended.
+
+
+## Registry-pressure recovery and renderer HTTP telemetry
+
+- If the current AVTransport item completes while the queued look-ahead WAV is still unpublished, the worker no longer retries indefinitely while retaining the completed current resource. It retires the completed URI, gives outstanding HTTP leases a bounded 3-second drain window, and then either starts the next item sequentially or drops it with an explicit error. If the playback watchdog expires without a confirmed STOPPED state, the worker first sends Stop; it does not retire the current resource on an unconfirmed timeout.
+- The registry still owns every successfully published WAV. Retiring a URI only prevents new acquisitions; an in-flight GET/HEAD/Range lease keeps the allocation alive until its handler exits. If leases do not drain within the bounded retry window, the next WAV is released by its still-owning worker path and playback exits rather than spinning forever or overwriting a live entry.
+- Registry-backed HTTP requests now log method, resource path (including generation/sequence), HTTP status, requested Range header, successfully sent byte count, and handler elapsed time. These logs are intended to characterize real SRS-X88 behavior: HEAD probes, full GETs, byte-range reads, repeated fetches, and whether a next resource is requested before the current item ends.
+- The telemetry is observational only. No claim is made about the X88's prefetch or transition behavior until logs from a physical device are available.
