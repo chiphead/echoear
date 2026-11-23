@@ -162,6 +162,10 @@ bool DlnaPlaybackManager::InitializeResampler(int source_sample_rate, int channe
 }
 
 void DlnaPlaybackManager::NotifyNetworkDisconnected() {
+    // Invalidate queued and active resources immediately. Any PCM frames still
+    // draining from AudioService are consumed and discarded, not sent locally
+    // halfway through an utterance.
+    AbortUtterance();
     network_available_.store(false);
     sink_ready_.store(false);
     network_lost_.store(true);
@@ -301,7 +305,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         }
         offset += chunk_samples;
 
-        if (offset < sample_count) {
+        if (offset < output_sample_count) {
             if (!QueueSegmentLocked(index)) {
                 buffer_dropping_[index] = true;
                 ESP_LOGE(kTag, "Could not queue completed DLNA segment");
@@ -553,7 +557,10 @@ void DlnaPlaybackManager::ProcessResource(const Resource& resource) {
     // duration-based safety deadline expires when the renderer lacks state support.
     WaitForPlaybackCompletion(resource.wav_size, resource.utterance_generation);
 
-    if (resource.utterance_generation != utterance_generation_.load()) {
+    if (resource.utterance_generation != utterance_generation_.load() ||
+        network_lost_.load() || !network_available_.load()) {
+        // Best effort even during Wi-Fi loss: do not leave the renderer
+        // pointed at a resource that is about to be unpublished.
         DlnaControl::Stop(renderer_, kControlTimeoutMs);
     }
     if (media_server_.IsRunning()) media_server_.Stop();
