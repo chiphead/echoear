@@ -31,4 +31,6 @@ public:
     static bool GetTransportState(const DlnaRenderer& renderer,
                                   DlnaTransportState& state,
                                   uint32_t timeout_ms = 3000);
+    static bool GetCurrentUri(const DlnaRenderer& renderer, std::string& uri,
+                              uint32_t timeout_ms = 3000);
 };
