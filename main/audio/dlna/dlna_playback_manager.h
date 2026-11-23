@@ -18,6 +18,7 @@
 #include "dlna_pcm_buffer.h"
 #include "dlna_discovery.h"
 #include "dlna_media_server.h"
+#include "dlna_resource_registry.h"
 
 /**
  * Routes all AudioService PCM output (TTS, prompt sounds and notifications)
@@ -91,6 +92,8 @@ private:
     std::atomic<bool> stopping_{false};
     SemaphoreHandle_t worker_stopped_ = nullptr;
 
+    DlnaResourceRegistry resource_registry_;
     DlnaMediaServer media_server_;
     uint8_t* current_wav_ = nullptr;
+    uint32_t resource_sequence_ = 0;
 };
