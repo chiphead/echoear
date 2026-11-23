@@ -5,7 +5,7 @@
 #include <mutex>
 
 /**
- * Bounded PCM accumulator for one DLNA utterance.
+ * Bounded PCM accumulator for one DLNA WAV segment.
  *
  * AudioService callbacks may append frames from its output task. FinalizeWav()
  * must be called from a worker task after playback has drained. The returned
