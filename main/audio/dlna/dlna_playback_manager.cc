@@ -674,13 +674,8 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         const bool renderer_stopped = state_ok &&
             transport == DlnaTransportState::kStopped;
         const bool stopped_after_play = renderer_stopped && current.observed_playing;
-        if ((stopped_after_play || duration_expired) && have_next && !next.published) {
-            // The previous retired resource may still have an HTTP lease. Keep
-            // the completed current item retained and retry Publish until that
-            // lease drains; never discard the queued next WAV or reuse live bytes.
-            continue;
-        }
-        if (duration_expired && !renderer_stopped && !have_next) {
+        if (duration_expired && !renderer_stopped &&
+            (!have_next || !next.published)) {
             ESP_LOGW(kTag, "Playback watchdog expired without a confirmed STOPPED state; stopping renderer");
             if (!DlnaControl::Stop(renderer_, kControlTimeoutMs)) {
                 renderer_ready_ = false;
@@ -693,6 +688,29 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         }
 
         if (stopped_after_play || duration_expired) {
+            if (have_next && !next.published) {
+                // Do not wait forever with the completed current item occupying
+                // a registry slot. Once playback is stopped, retire it and give
+                // outstanding HTTP leases a bounded window to drain.
+                ESP_LOGW(kTag, "Next WAV is not published; retiring completed item before bounded retry");
+                resource_registry_.Retire(current.path);
+                bool next_published = false;
+                for (int attempt = 0; attempt < 30 && !stopping_.load() &&
+                     network_available_.load() && !network_lost_.load() &&
+                     current.resource.utterance_generation == utterance_generation_.load();
+                     ++attempt) {
+                    if (publish_item(next)) {
+                        next_published = true;
+                        break;
+                    }
+                    vTaskDelay(pdMS_TO_TICKS(100));
+                }
+                if (!next_published) {
+                    ESP_LOGE(kTag, "Next WAV could not be published after bounded lease-drain wait");
+                    break;
+                }
+                ESP_LOGI(kTag, "Published retained next item after current resource retirement");
+            }
             if (have_next && next.published) {
                 // A successful SetNext may have transitioned while the
                 // transport-state query briefly reports STOPPED. Keep both
