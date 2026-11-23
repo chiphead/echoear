@@ -215,8 +215,13 @@ esp_err_t DlnaMediaServer::HandleRequest(httpd_req_t* request) {
 
 esp_err_t DlnaMediaServer::ServeRequest(httpd_req_t* request) {
     if (registry_ != nullptr) {
+        // req->uri may include a query string; registry keys are path-only.
+        std::string request_path(request->uri);
+        const size_t query = request_path.find('?');
+        if (query != std::string::npos) request_path.resize(query);
+
         DlnaResourceView view;
-        if (!registry_->Acquire(request->uri, view)) {
+        if (!registry_->Acquire(request_path, view)) {
             httpd_resp_set_status(request, "404 Not Found");
             return httpd_resp_send(request, "Unknown media resource", HTTPD_RESP_USE_STRLEN);
         }
@@ -225,7 +230,7 @@ esp_err_t DlnaMediaServer::ServeRequest(httpd_req_t* request) {
             uint32_t lease_id;
             ~LeaseGuard() { registry->Release(lease_id); }
         } guard{registry_, view.lease_id};
-        return ServeResource(request, view.data, view.size, request->uri);
+        return ServeResource(request, view.data, view.size, request_path.c_str());
     }
     return ServeResource(request, wav_data_, wav_size_, kMediaPath);
 }
