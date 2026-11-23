@@ -955,9 +955,28 @@ void DlnaPlaybackManager::Worker() {
                 continue;
             }
             resource_registry_.RetireAll();
+
+            // Anything still queued belongs to the pre-disconnect playback
+            // generation. Drop it now rather than letting stale WAVs occupy
+            // queue slots after the network comes back.
+            Resource stale{};
+            size_t stale_resources = 0;
+            while (resource_queue_ != nullptr &&
+                   xQueueReceive(resource_queue_, &stale, 0) == pdTRUE) {
+                if (stale.wav_data != nullptr) heap_caps_free(stale.wav_data);
+                if (stale.buffer_index < kBufferCount) {
+                    recycle_mask_.fetch_or(1u << stale.buffer_index);
+                }
+                ++stale_resources;
+                stale = Resource{};
+            }
+
             renderer_ready_ = false;
             next_discovery = 0;
-            ESP_LOGI(kTag, "Network loss/reconnect: released active DLNA resource");
+            ESP_LOGI(kTag,
+                     "Network loss/reconnect: released active DLNA resource; "
+                     "discarded %u queued stale segment(s)",
+                     static_cast<unsigned>(stale_resources));
         }
 
         if (network_available_.load() && !renderer_ready_ &&
