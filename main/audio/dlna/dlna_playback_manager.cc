@@ -773,6 +773,16 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                     network_lost_.store(true);
                 }
                 ESP_LOGE(kTag, "Renderer Stop failed; media server shutdown requested before WAV retirement");
+                // A published next item is owned by the registry and will be
+                // retired after HTTPD has stopped. An unpublished look-ahead
+                // item is still owned by this stack frame and must be freed
+                // even though this error path returns before normal cleanup.
+                if (have_next && !next.published &&
+                    next.resource.wav_data != nullptr) {
+                    heap_caps_free(next.resource.wav_data);
+                    next.resource.wav_data = nullptr;
+                    next.resource.wav_size = 0;
+                }
                 return;
             }
         }
