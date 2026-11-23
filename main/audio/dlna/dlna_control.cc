@@ -46,7 +46,8 @@ std::string XmlEscape(const std::string& value) {
 }
 
 bool Invoke(const DlnaRenderer& renderer, const char* action,
-            const std::string& arguments, uint32_t timeout_ms) {
+            const std::string& arguments, uint32_t timeout_ms,
+            std::string* response_body = nullptr) {
     if (renderer.av_transport_control_url.empty() ||
         renderer.av_transport_service_type.empty()) {
         ESP_LOGE(kTag, "Renderer has no AVTransport control endpoint");
@@ -111,6 +112,7 @@ bool Invoke(const DlnaRenderer& renderer, const char* action,
         return false;
     }
 
+    if (response_body != nullptr) *response_body = response.body;
     ESP_LOGI(kTag, "%s accepted by renderer (HTTP %d)", action, status);
     return true;
 }
@@ -147,4 +149,43 @@ bool DlnaControl::SetUriAndPlay(const DlnaRenderer& renderer,
 
 bool DlnaControl::Stop(const DlnaRenderer& renderer, uint32_t timeout_ms) {
     return Invoke(renderer, "Stop", "<InstanceID>0</InstanceID>", timeout_ms);
+}
+
+namespace {
+bool ExtractXmlValue(const std::string& xml, const char* tag, std::string& value) {
+    const std::string open = std::string("<") + tag + ">";
+    const std::string close = std::string("</") + tag + ">";
+    const size_t begin = xml.find(open);
+    if (begin == std::string::npos) return false;
+    const size_t value_begin = begin + open.size();
+    const size_t end = xml.find(close, value_begin);
+    if (end == std::string::npos) return false;
+    value = xml.substr(value_begin, end - value_begin);
+    return !value.empty();
+}
+}  // namespace
+
+bool DlnaControl::GetTransportState(const DlnaRenderer& renderer,
+                                    DlnaTransportState& state,
+                                    uint32_t timeout_ms) {
+    std::string response;
+    if (!Invoke(renderer, "GetTransportInfo",
+                "<InstanceID>0</InstanceID>", timeout_ms, &response)) {
+        state = DlnaTransportState::kUnknown;
+        return false;
+    }
+    std::string raw;
+    if (!ExtractXmlValue(response, "CurrentTransportState", raw)) {
+        state = DlnaTransportState::kUnknown;
+        return false;
+    }
+    if (raw == "PLAYING") state = DlnaTransportState::kPlaying;
+    else if (raw == "STOPPED" || raw == "NO_MEDIA_PRESENT")
+        state = DlnaTransportState::kStopped;
+    else if (raw == "PAUSED_PLAYBACK" || raw == "PAUSED_RECORDING")
+        state = DlnaTransportState::kPaused;
+    else if (raw == "TRANSITIONING")
+        state = DlnaTransportState::kTransitioning;
+    else state = DlnaTransportState::kUnknown;
+    return true;
 }
