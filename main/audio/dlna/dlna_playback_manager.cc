@@ -741,9 +741,6 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             }
         }
 
-        if (xTaskGetTickCount() < next_poll) continue;
-        next_poll = xTaskGetTickCount() + pdMS_TO_TICKS(650);
-
         if (have_next && next.published && !next.next_action_attempted &&
             renderer_.supports_set_next_av_transport_uri) {
             // Issue SetNext as soon as the look-ahead WAV is published.
@@ -792,6 +789,11 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                 }
             }
         }
+
+        if (xTaskGetTickCount() < next_poll) continue;
+        next_poll = xTaskGetTickCount() + pdMS_TO_TICKS(650);
+
+
 
         // SOAP state and media-info queries are not an atomic snapshot. Read
         // CurrentURI before the transport state, then confirm it again only
