@@ -1142,6 +1142,7 @@ idf_component_register(SRCS ${SOURCES}
                     WHOLE_ARCHIVE
                     PRIV_REQUIRES
                         echoear-core
+                        esp_audio_effects
                         esp_pm
                         esp_psram
                         esp_netif
