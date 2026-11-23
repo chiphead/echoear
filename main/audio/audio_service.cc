@@ -176,9 +176,11 @@ void AudioService::Stop() {
     xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING | AS_EVENT_WAKE_WORD_RUNNING |
                                          AS_EVENT_AUDIO_PROCESSOR_RUNNING);
 
+    bool playback_aborted = false;
     bool notify_drained = false;
     {
         std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+        playback_aborted = !IsPlaybackDrainedLocked();
         ++playback_generation_;
         audio_encode_queue_.clear();
         audio_decode_queue_.clear();
@@ -186,6 +188,9 @@ void AudioService::Stop() {
         audio_testing_queue_.clear();
         notify_drained = MarkPlaybackDrainedLocked();
         audio_queue_cv_.notify_all();
+    }
+    if (playback_aborted && callbacks_.on_playback_aborted) {
+        callbacks_.on_playback_aborted();
     }
     if (notify_drained && callbacks_.on_playback_drained) {
         callbacks_.on_playback_drained();
@@ -804,9 +809,11 @@ bool AudioService::IsPlaybackIdle() {
 }
 
 void AudioService::ResetDecoder() {
+    bool playback_aborted = false;
     bool notify_drained = false;
     {
         std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+        playback_aborted = !IsPlaybackDrainedLocked();
         ++playback_generation_;
         std::unique_lock<std::mutex> decoder_lock(decoder_mutex_);
         if (opus_decoder_ != nullptr) {
@@ -819,6 +826,9 @@ void AudioService::ResetDecoder() {
         audio_testing_queue_.clear();
         notify_drained = MarkPlaybackDrainedLocked();
         audio_queue_cv_.notify_all();
+    }
+    if (playback_aborted && callbacks_.on_playback_aborted) {
+        callbacks_.on_playback_aborted();
     }
     if (notify_drained && callbacks_.on_playback_drained) {
         callbacks_.on_playback_drained();
