@@ -191,6 +191,7 @@ void DlnaPlaybackManager::NotifyNetworkDisconnected() {
         const bool dlna_utterance_in_progress =
             utterance_decided_ && !fallback_utterance_;
         discard_until_drain_ = discard_until_drain_ || dlna_utterance_in_progress;
+        end_pending_ = false;
         const uint8_t index = write_buffer_index_;
         buffers_[index].Reset();
         buffer_active_[index] = false;
@@ -207,6 +208,18 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
 
     std::lock_guard<std::mutex> lock(buffer_mutex_);
     if (discard_until_drain_) return true;
+    if (end_pending_) {
+        const TickType_t silence_ticks = pdMS_TO_TICKS(kEndSilenceGraceMs);
+        if ((xTaskGetTickCount() - end_pending_tick_) >= silence_ticks) {
+            // A real quiet interval separates utterances. Finalize the previous
+            // tail before accepting this frame as a new utterance.
+            FinalizePendingUtteranceLocked();
+        } else {
+            // Queue drain was only a short inter-packet gap. Keep the same WAV
+            // segment and, importantly, preserve the resampler's filter state.
+            end_pending_ = false;
+        }
+    }
     if (channels < 1 || channels > 2 ||
         sample_count % static_cast<size_t>(channels) != 0) {
         if (utterance_decided_ && !fallback_utterance_) {
@@ -406,44 +419,55 @@ bool DlnaPlaybackManager::QueueSegmentLocked(uint8_t index) {
 }
 
 void DlnaPlaybackManager::EndUtterance() {
-    {
-        std::lock_guard<std::mutex> lock(buffer_mutex_);
-        if (resampler_ != nullptr) esp_ae_rate_cvt_reset(resampler_);
+    std::lock_guard<std::mutex> lock(buffer_mutex_);
+    if (discard_until_drain_) {
         const uint8_t index = write_buffer_index_;
-        if (discard_until_drain_) {
-            buffers_[index].Reset();
-            buffer_active_[index] = false;
-            buffer_dropping_[index] = false;
-            fallback_utterance_ = false;
-            utterance_decided_ = false;
-            discard_until_drain_ = false;
-            return;
-        }
-        if (fallback_utterance_) {
-            fallback_utterance_ = false;
-            utterance_decided_ = false;
-            return;
-        }
-        if (buffer_dropping_[index]) {
-            if (buffer_ready_[index]) buffers_[index].Reset();
-            buffer_active_[index] = false;
-            buffer_dropping_[index] = false;
-            utterance_decided_ = false;
-            fallback_utterance_ = false;
-            callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
-            return;
-        }
-        if (buffer_active_[index] && buffer_ready_[index]) {
-            if (!QueueSegmentLocked(index)) {
-                callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
-            }
-        }
-        utterance_decided_ = false;
+        buffers_[index].Reset();
+        buffer_active_[index] = false;
+        buffer_dropping_[index] = false;
         fallback_utterance_ = false;
-        const int available = FindReadyBufferLocked(index);
-        if (available >= 0) write_buffer_index_ = static_cast<uint8_t>(available);
+        utterance_decided_ = false;
+        end_pending_ = false;
+        discard_until_drain_ = false;
+        if (resampler_ != nullptr) esp_ae_rate_cvt_reset(resampler_);
+        return;
+    }
+    if (fallback_utterance_) {
+        fallback_utterance_ = false;
+        utterance_decided_ = false;
+        end_pending_ = false;
+        if (resampler_ != nullptr) esp_ae_rate_cvt_reset(resampler_);
+        return;
+    }
+    if (!utterance_decided_) return;
+
+    // AudioService queue-drained is not a protocol end-of-stream marker. A
+    // short inter-packet gap must not turn every Opus frame into a tiny WAV.
+    end_pending_ = true;
+    end_pending_tick_ = xTaskGetTickCount();
+}
+
+void DlnaPlaybackManager::FinalizePendingUtteranceLocked() {
+    if (!end_pending_) return;
+    end_pending_ = false;
+    if (resampler_ != nullptr) esp_ae_rate_cvt_reset(resampler_);
+
+    const uint8_t index = write_buffer_index_;
+    if (buffer_dropping_[index]) {
+        if (buffer_ready_[index]) buffers_[index].Reset();
+        buffer_active_[index] = false;
+        buffer_dropping_[index] = false;
+        callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
+    } else if (buffer_active_[index] && buffer_ready_[index]) {
+        if (!QueueSegmentLocked(index)) {
+            callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
+        }
     }
 
+    utterance_decided_ = false;
+    fallback_utterance_ = false;
+    const int available = FindReadyBufferLocked(index);
+    if (available >= 0) write_buffer_index_ = static_cast<uint8_t>(available);
 }
 
 void DlnaPlaybackManager::AbortUtterance() {
@@ -453,6 +477,7 @@ void DlnaPlaybackManager::AbortUtterance() {
     // A frame may already be in AudioOutputTask but not yet have reached the
     // PCM callback. Consume/discard frames until AudioService reports drain.
     discard_until_drain_ = true;
+    end_pending_ = false;
     const uint8_t index = write_buffer_index_;
     buffers_[index].Reset();
     buffer_active_[index] = false;
@@ -810,6 +835,15 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
 void DlnaPlaybackManager::Worker() {
     TickType_t next_discovery = 0;
     while (!stopping_.load()) {
+        {
+            std::lock_guard<std::mutex> lock(buffer_mutex_);
+            if (end_pending_ &&
+                (xTaskGetTickCount() - end_pending_tick_) >=
+                    pdMS_TO_TICKS(kEndSilenceGraceMs)) {
+                FinalizePendingUtteranceLocked();
+            }
+        }
+
         const uint32_t callback_issues =
             callback_issue_count_.exchange(0, std::memory_order_relaxed);
         if (callback_issues > 0) {
