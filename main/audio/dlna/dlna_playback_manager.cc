@@ -241,7 +241,12 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         new_utterance = true;
         utterance_decided_ = true;
         current_utterance_generation_ = utterance_generation_.load();
-        if (resource_queue_ == nullptr || !sink_ready_.load()) {
+        // sink_ready_ can briefly lag a disconnect/reconnect transition:
+        // discovery may finish while NotifyNetworkDisconnected() is running.
+        // Require the network session itself to be active before committing
+        // this utterance to DLNA; otherwise keep the whole utterance local.
+        if (resource_queue_ == nullptr || !sink_ready_.load() ||
+            !network_available_.load() || network_lost_.load()) {
             fallback_utterance_ = true;
             return false;
         }
