@@ -30,6 +30,17 @@ bool IsSonyX88(const DlnaRenderer& renderer) {
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return identity.find("srs-x88") != std::string::npos;
 }
+
+const char* TransportStateName(DlnaTransportState state) {
+    switch (state) {
+        case DlnaTransportState::kStopped: return "STOPPED";
+        case DlnaTransportState::kNoMediaPresent: return "NO_MEDIA_PRESENT";
+        case DlnaTransportState::kPlaying: return "PLAYING";
+        case DlnaTransportState::kPaused: return "PAUSED";
+        case DlnaTransportState::kTransitioning: return "TRANSITIONING";
+        case DlnaTransportState::kUnknown: default: return "UNKNOWN";
+    }
+}
 }  // namespace
 
 DlnaPlaybackManager::~DlnaPlaybackManager() {
@@ -576,6 +587,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         bool next_action_maybe_accepted = false;
         TickType_t next_action_maybe_accepted_at = 0;
         bool next_uri_observed = false;
+        int last_logged_next_transport_state = -1;
     };
 
     auto recycle_buffer = [this](uint8_t index) {
@@ -814,6 +826,14 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
 
         DlnaTransportState transport = DlnaTransportState::kUnknown;
         const bool state_ok = DlnaControl::GetTransportState(renderer_, transport, 1500);
+        if (next_uri_matches_before_state && state_ok) {
+            const int state_value = static_cast<int>(transport);
+            if (state_value != next.last_logged_next_transport_state) {
+                next.last_logged_next_transport_state = state_value;
+                ESP_LOGI(kTag, "Preloaded URI transport state: %s",
+                         TransportStateName(transport));
+            }
+        }
         if (state_ok && transport == DlnaTransportState::kPlaying) {
             if (!current.playback_start_logged) {
                 current.playback_start_logged = true;
