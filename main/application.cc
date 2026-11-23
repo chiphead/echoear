@@ -342,6 +342,9 @@ void Application::HandleNetworkConnectedEvent() {
 }
 
 void Application::HandleNetworkDisconnectedEvent() {
+#if CONFIG_DLNA_AUDIO_OUTPUT
+    dlna_playback_manager_.NotifyNetworkDisconnected();
+#endif
     // Close current conversation when network disconnected
     auto state = GetDeviceState();
     if (state == kDeviceStateNotifying) {
