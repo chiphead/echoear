@@ -23,6 +23,7 @@ struct DlnaResourceView {
 class DlnaResourceRegistry {
 public:
     static constexpr size_t kMaxResources = 2;
+    static constexpr size_t kMaxLeases = 8;
 
     DlnaResourceRegistry() = default;
     ~DlnaResourceRegistry();
@@ -43,14 +44,20 @@ private:
         std::string path;
         uint8_t* data = nullptr;
         size_t size = 0;
-        uint32_t lease_id = 0;
         uint16_t references = 0;
         bool occupied = false;
         bool retired = false;
     };
 
+    struct Lease {
+        uint32_t id = 0;
+        uint8_t entry_index = 0;
+        bool active = false;
+    };
+
     static void FreeEntry(Entry& entry);
     mutable std::mutex mutex_;
     std::array<Entry, kMaxResources> entries_{};
+    std::array<Lease, kMaxLeases> leases_{};
     uint32_t next_lease_id_ = 1;
 };
