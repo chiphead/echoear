@@ -838,8 +838,9 @@ void DlnaPlaybackManager::Worker() {
     while (!stopping_.load()) {
         // Report both free and largest contiguous blocks. Free bytes alone can
         // hide fragmentation that prevents a 256 KiB segment from being recycled.
-        if (xTaskGetTickCount() >= next_memory_report) {
-            next_memory_report = xTaskGetTickCount() + pdMS_TO_TICKS(10000);
+        const TickType_t memory_report_now = xTaskGetTickCount();
+        if (static_cast<int32_t>(memory_report_now - next_memory_report) >= 0) {
+            next_memory_report = memory_report_now + pdMS_TO_TICKS(10000);
             size_t ready_buffers = 0;
             size_t active_buffers = 0;
             {
