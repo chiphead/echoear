@@ -95,8 +95,9 @@ void Application::Initialize() {
 #endif
     callbacks.on_playback_drained = [this]() {
 #if CONFIG_DLNA_AUDIO_OUTPUT
-        // The callback runs after AudioOutputTask has emitted every queued PCM
-        // frame. Finalize only the WAV header here; network work stays in worker.
+        // Queue drain may be a short inter-packet gap rather than end-of-stream.
+        // DLNA applies a bounded silence grace before finalizing the partial WAV;
+        // all network work remains in its worker task.
         dlna_playback_manager_.EndUtterance();
 #endif
         xEventGroupSetBits(event_group_, MAIN_EVENT_PLAYBACK_DRAINED);
