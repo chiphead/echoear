@@ -251,7 +251,7 @@ esp_err_t DlnaMediaServer::ServeResource(httpd_req_t* request,
     size_t range_header_len = httpd_req_get_hdr_value_len(request, "Range");
     std::string request_range;
     if (range_header_len > 0) {
-        request_range.resize(range_header_len + 1, '\\0');
+        request_range.resize(range_header_len + 1, '\0');
         if (httpd_req_get_hdr_value_str(request, "Range", request_range.data(),
                                         request_range.size()) == ESP_OK) {
             request_range.resize(std::char_traits<char>::length(request_range.c_str()));
@@ -272,11 +272,17 @@ esp_err_t DlnaMediaServer::ServeResource(httpd_req_t* request,
 
     if (data == nullptr || size == 0) {
         if (request->method == HTTP_HEAD) {
-            return SendHeadResponse(request, "503 Service Unavailable",
-                                    "text/plain", sizeof("No audio resource") - 1);
+            const esp_err_t result = SendHeadResponse(
+                request, "503 Service Unavailable", "text/plain",
+                sizeof("No audio resource") - 1);
+            log_result(503, 0);
+            return result;
         }
         httpd_resp_set_status(request, "503 Service Unavailable");
-        return httpd_resp_send(request, "No audio resource", HTTPD_RESP_USE_STRLEN);
+        const esp_err_t result =
+            httpd_resp_send(request, "No audio resource", HTTPD_RESP_USE_STRLEN);
+        log_result(503, 0);
+        return result;
     }
 
     size_t first = 0;
@@ -290,25 +296,35 @@ esp_err_t DlnaMediaServer::ServeResource(httpd_req_t* request,
                                         range.size()) != ESP_OK) {
             const std::string content_range = "bytes */" + std::to_string(size);
             if (request->method == HTTP_HEAD) {
-                return SendHeadResponse(request, "416 Range Not Satisfiable",
-                                        "text/plain", sizeof("Invalid Range") - 1,
-                                        content_range.c_str());
+                const esp_err_t result = SendHeadResponse(
+                    request, "416 Range Not Satisfiable", "text/plain",
+                    sizeof("Invalid Range") - 1, content_range.c_str());
+                log_result(416, 0);
+                return result;
             }
             httpd_resp_set_status(request, "416 Range Not Satisfiable");
             httpd_resp_set_hdr(request, "Content-Range", content_range.c_str());
-            return httpd_resp_send(request, "Invalid Range", HTTPD_RESP_USE_STRLEN);
+            const esp_err_t result =
+                httpd_resp_send(request, "Invalid Range", HTTPD_RESP_USE_STRLEN);
+            log_result(416, 0);
+            return result;
         }
         range.resize(std::char_traits<char>::length(range.c_str()));
         if (!ParseRange(range, size, first, last)) {
             const std::string content_range = "bytes */" + std::to_string(size);
             if (request->method == HTTP_HEAD) {
-                return SendHeadResponse(request, "416 Range Not Satisfiable",
-                                        "text/plain", sizeof("Invalid Range") - 1,
-                                        content_range.c_str());
+                const esp_err_t result = SendHeadResponse(
+                    request, "416 Range Not Satisfiable", "text/plain",
+                    sizeof("Invalid Range") - 1, content_range.c_str());
+                log_result(416, 0);
+                return result;
             }
             httpd_resp_set_status(request, "416 Range Not Satisfiable");
             httpd_resp_set_hdr(request, "Content-Range", content_range.c_str());
-            return httpd_resp_send(request, "Invalid Range", HTTPD_RESP_USE_STRLEN);
+            const esp_err_t result =
+                httpd_resp_send(request, "Invalid Range", HTTPD_RESP_USE_STRLEN);
+            log_result(416, 0);
+            return result;
         }
         partial = true;
     }
