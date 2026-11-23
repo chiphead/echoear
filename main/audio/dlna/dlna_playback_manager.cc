@@ -1209,9 +1209,20 @@ void DlnaPlaybackManager::Worker() {
         }
 
         if (network_available_.load() && !renderer_ready_ &&
+            !network_lost_.load() &&
             (next_discovery == 0 || xTaskGetTickCount() >= next_discovery)) {
-            renderer_ready_ = FindSonyRenderer(renderer_);
+            const bool discovered = FindSonyRenderer(renderer_);
+            // Discovery performs several blocking network requests. The link
+            // may be lost while it runs, so its result must not revive a sink
+            // belonging to the invalidated session.
+            renderer_ready_ = discovered && network_available_.load() &&
+                              !network_lost_.load();
             sink_ready_.store(renderer_ready_ && output_format_ready_);
+            // Close the store-vs-disconnect race: if disconnect happened
+            // immediately before sink_ready_ was published, clear it again.
+            if (!network_available_.load() || network_lost_.load()) {
+                sink_ready_.store(false);
+            }
             next_discovery = xTaskGetTickCount() + pdMS_TO_TICKS(5000);
         }
 
@@ -1240,7 +1251,8 @@ void DlnaPlaybackManager::Worker() {
             }
 
             if (resource.wav_data != nullptr) {
-                if (network_available_.load() && renderer_ready_) {
+                if (network_available_.load() && !network_lost_.load() &&
+                    renderer_ready_) {
                     ProcessResource(resource);
                 } else {
                     heap_caps_free(resource.wav_data);
