@@ -16,6 +16,9 @@
 #include <vector>
 
 #include "audio_service.h"
+#if CONFIG_DLNA_AUDIO_OUTPUT
+#include "audio/dlna/dlna_playback_manager.h"
+#endif
 #include "device_state.h"
 #include "device_state_machine.h"
 #include "notify/notify_player.h"
@@ -143,6 +146,9 @@ private:
     AecMode aec_mode_ = kAecOff;
     std::string last_error_message_;
     AudioService audio_service_;
+#if CONFIG_DLNA_AUDIO_OUTPUT
+    DlnaPlaybackManager dlna_playback_manager_;
+#endif
     std::atomic<bool> voice_interaction_enabled_{true};
     NotifyPlayer notify_player_;
     uint32_t notification_playback_id_ = 0;
