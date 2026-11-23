@@ -1,4 +1,5 @@
 #include "audio_service.h"
+#include <cstdint>
 #include <esp_log.h>
 #include <cstring>
 
