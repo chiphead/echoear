@@ -182,3 +182,6 @@ AVTransport SOAP escaping and response extraction now share the header-only `dln
 
 
 - HTTP server shutdown failure is now treated as an ownership boundary, not a log-only error. The worker checks whether the server handle remains active before calling `RetireAll()`; on failure it retries shutdown while keeping the manager and registry alive. The worker does not signal its completion semaphore until HTTPD has stopped, preventing destruction of the handler context while a request may still reference it. This deliberately prefers a delayed shutdown over a use-after-free.
+
+
+- Transition handling now distinguishes a confirmed next-item URI from a confirmed PLAYING state. When `GetMediaInfo` reports the preloaded next URI but AVTransport is still `TRANSITIONING` (or temporarily reports STOPPED), the worker retains both WAV resources and allows up to 10 seconds from the accepted `SetNextAVTransportURI` action for the renderer to enter PLAYING. It no longer immediately overwrites an already-selected next URI with a second `SetAVTransportURI` merely because PLAYING has not appeared yet. If the renderer never starts the item within that bounded window, the existing sequential recovery remains available.
