@@ -227,7 +227,7 @@ esp_err_t DlnaMediaServer::ServeRequest(httpd_req_t* request) {
         } guard{registry_, view.lease_id};
         return ServeResource(request, view.data, view.size, request->uri);
     }
-    return ServeResource(request, wav_data_, size, kMediaPath);
+    return ServeResource(request, wav_data_, wav_size_, kMediaPath);
 }
 
 esp_err_t DlnaMediaServer::ServeResource(httpd_req_t* request,
