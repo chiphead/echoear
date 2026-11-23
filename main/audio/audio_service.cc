@@ -31,6 +31,10 @@ AudioService::AudioService() { event_group_ = xEventGroupCreate(); }
 AudioService::~AudioService() {
     // Never destroy task-owned state while an audio task can still access it.
     Stop();
+    if (audio_power_timer_ != nullptr) {
+        esp_timer_delete(audio_power_timer_);
+        audio_power_timer_ = nullptr;
+    }
     if (event_group_ != nullptr) {
         vEventGroupDelete(event_group_);
     }
@@ -118,6 +122,10 @@ void AudioService::Initialize(AudioCodec* codec) {
 }
 
 void AudioService::Start() {
+    if (event_group_ == nullptr || codec_ == nullptr) {
+        ESP_LOGE(TAG, "Start rejected: AudioService is not initialized");
+        return;
+    }
     if (!service_stopped_.load()) {
         ESP_LOGW(TAG, "Start ignored: audio service is already running");
         return;
