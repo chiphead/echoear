@@ -258,6 +258,62 @@ bool DlnaPlaybackManager::FindSonyRenderer(DlnaRenderer& renderer) {
     return false;
 }
 
+
+void DlnaPlaybackManager::WaitForPlaybackCompletion(size_t wav_size) {
+    // Canonical PCM WAV fields: byte rate at offset 28, data size at offset 40.
+    // The buffer is still owned by current_wav_ while this method runs.
+    uint32_t byte_rate = 0;
+    uint32_t data_size = 0;
+    if (wav_size >= 44) {
+        const uint8_t* wav = current_wav_;
+        byte_rate = static_cast<uint32_t>(wav[28]) |
+                    (static_cast<uint32_t>(wav[29]) << 8) |
+                    (static_cast<uint32_t>(wav[30]) << 16) |
+                    (static_cast<uint32_t>(wav[31]) << 24);
+        data_size = static_cast<uint32_t>(wav[40]) |
+                    (static_cast<uint32_t>(wav[41]) << 8) |
+                    (static_cast<uint32_t>(wav[42]) << 16) |
+                    (static_cast<uint32_t>(wav[43]) << 24);
+    }
+    const uint32_t duration_ms = byte_rate == 0 ? 0 :
+        static_cast<uint32_t>((static_cast<uint64_t>(data_size) * 1000) / byte_rate);
+    const uint32_t fallback_wait_ms = std::min<uint32_t>(duration_ms + 5000, 120000);
+    const TickType_t started = xTaskGetTickCount();
+    bool observed_playing = false;
+    bool transport_query_succeeded = false;
+
+    ESP_LOGI(kTag, "Tracking renderer playback (estimated duration=%u ms)", duration_ms);
+    while (!stopping_.load() && network_available_.load() &&
+           !network_lost_.load()) {
+        vTaskDelay(pdMS_TO_TICKS(750));
+        if (stopping_.load() || !network_available_.load() || network_lost_.load()) break;
+
+        DlnaTransportState state = DlnaTransportState::kUnknown;
+        if (DlnaControl::GetTransportState(renderer_, state, 2500)) {
+            transport_query_succeeded = true;
+            if (state == DlnaTransportState::kPlaying) {
+                observed_playing = true;
+            } else if (observed_playing && state == DlnaTransportState::kStopped) {
+                ESP_LOGI(kTag, "Renderer reports playback completed");
+                break;
+            }
+        }
+
+        const uint32_t elapsed_ms = static_cast<uint32_t>(
+            (xTaskGetTickCount() - started) * portTICK_PERIOD_MS);
+        if (!observed_playing && elapsed_ms >= fallback_wait_ms) {
+            ESP_LOGW(kTag,
+                     "No PLAYING state observed; releasing resource after duration-based safety wait (transport queries=%d)",
+                     transport_query_succeeded);
+            break;
+        }
+        if (observed_playing && elapsed_ms >= 120000) {
+            ESP_LOGW(kTag, "Playback state did not return to STOPPED; applying 120 s safety limit");
+            break;
+        }
+    }
+}
+
 void DlnaPlaybackManager::ProcessResource(const Resource& resource) {
     if (resource.wav_data == nullptr || resource.wav_size == 0) return;
 
@@ -305,6 +361,16 @@ void DlnaPlaybackManager::ProcessResource(const Resource& resource) {
     current_wav_ = resource.wav_data;
     ESP_LOGI(kTag, "DLNA playback command accepted (%u bytes)",
              static_cast<unsigned>(resource.wav_size));
+
+    // Keep the HTTP resource alive until AVTransport reports STOPPED, or a
+    // duration-based safety deadline expires when the renderer lacks state support.
+    WaitForPlaybackCompletion(resource.wav_size);
+
+    if (media_server_.IsRunning()) media_server_.Stop();
+    if (current_wav_ != nullptr) {
+        heap_caps_free(current_wav_);
+        current_wav_ = nullptr;
+    }
 }
 
 void DlnaPlaybackManager::Worker() {
