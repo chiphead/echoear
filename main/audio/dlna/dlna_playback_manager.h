@@ -68,6 +68,9 @@ private:
     uint8_t write_buffer_index_ = 0;
     bool utterance_decided_ = false;
     bool fallback_utterance_ = false;
+    // Once any segment of a DLNA-routed utterance is lost, discard its
+    // remaining PCM until EndUtterance; never resume after a missing middle.
+    bool utterance_dropping_ = false;
     bool discard_until_drain_ = false;
     bool end_pending_ = false;
     TickType_t end_pending_tick_ = 0;
