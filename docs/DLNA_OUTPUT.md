@@ -16,8 +16,9 @@ This feature branch adds a staged DLNA output path for the Waveshare ESP32-S3-To
 2. **Renderer description** — implemented in `main/audio/dlna/dlna_device_description.*`. Fetch LOCATION over HTTP, extract FriendlyName/Manufacturer/ModelName/UDN, and resolve the AVTransport service type and control URL using UPnP `URLBase` when present. The response is bounded to 24 KiB.
 3. **Media HTTP endpoint** — `DlnaMediaServer` now serves one immutable WAV buffer over HTTP, supports GET, HEAD, and single-byte-range requests, and returns `audio/wav`. HEAD responses advertise the selected representation length without sending the WAV body. The caller must keep the buffer alive and unchanged until the server stops.
 4. **AVTransport control** — `DlnaControl` sends `SetAVTransportURI`, `Play`, and `Stop` SOAP actions with bounded response capture and XML-escaped DIDL-Lite metadata. Calls are blocking and must run in a worker task; renderer state/event subscription remains pending.
-5. **Audio sink integration** — add a non-blocking sink interface after PCM decode; preserve LocalSink as the default.
-6. **TTS lifecycle and UX** — buffer/stream decoded PCM, handle interruption, playback completion, Wi-Fi loss, and microphone/AEC policy.
+5. **PCM output abstraction** — add a selectable output sink after Opus decode. The default remains the existing ES8311/local codec path; a DLNA sink must accept PCM without performing network I/O on `AudioOutputTask`.
+6. **Utterance buffering and publication** — initially buffer one completed TTS utterance as PCM, then publish it as a WAV resource with a known `Content-Length` and Range support. Only after the buffer is immutable and the HTTP endpoint is ready should a worker issue `SetAVTransportURI` and `Play`. This deliberately favors protocol compatibility and bounded complexity over low-latency streaming; true live streaming can be evaluated later against renderer behavior.
+7. **TTS lifecycle and UX** — handle interruption, playback completion, Wi-Fi loss, buffer limits/PSRAM exhaustion, output selection, and microphone/AEC policy. Keep the microphone capture and ES8311 input path independent from the selected speaker output.
 
 ## Current discovery API
 
@@ -58,5 +59,6 @@ task and does not intercept TTS PCM or alter the local ES8311 audio path.
 ## Current limitations
 
 - SSDP discovery, UPnP device-description parsing, and a first AVTransport SOAP control client are implemented. SOAP control is not yet validated against a physical renderer; the audio sink routing remains unimplemented. The HTTP endpoint is implemented but not yet tested against the SRS-X88.
-- The DLNA modules and optional smoke-test worker have not yet been compiled with the project's ESP-IDF 6.1.x environment or validated on hardware.
+- The DLNA modules and optional smoke-test worker have not yet been confirmed compiled with the project's ESP-IDF 6.1.x environment or validated on hardware.
+- TTS-to-DLNA routing is intentionally not part of the smoke test. The next implementation milestone is a non-blocking PCM sink abstraction, followed by bounded whole-utterance buffering and asynchronous publication/control. No X88 hardware availability is required to implement or review these software layers.
 - The Sony SRS-X88 must be on the same LAN/VLAN and have network standby / network control enabled as applicable.
