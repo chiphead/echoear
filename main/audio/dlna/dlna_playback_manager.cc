@@ -961,14 +961,21 @@ void DlnaPlaybackManager::Worker() {
             // queue slots after the network comes back.
             Resource stale{};
             size_t stale_resources = 0;
-            while (resource_queue_ != nullptr &&
-                   xQueueReceive(resource_queue_, &stale, 0) == pdTRUE) {
-                if (stale.wav_data != nullptr) heap_caps_free(stale.wav_data);
-                if (stale.buffer_index < kBufferCount) {
-                    recycle_mask_.fetch_or(1u << stale.buffer_index);
+            {
+                // QueueSegmentLocked() sends while holding this same mutex.
+                // Pairing the drain with it closes the race where an in-flight
+                // AudioOutputTask callback enqueues an old-generation WAV just
+                // after the worker has emptied the queue.
+                std::lock_guard<std::mutex> lock(buffer_mutex_);
+                while (resource_queue_ != nullptr &&
+                       xQueueReceive(resource_queue_, &stale, 0) == pdTRUE) {
+                    if (stale.wav_data != nullptr) heap_caps_free(stale.wav_data);
+                    if (stale.buffer_index < kBufferCount) {
+                        recycle_mask_.fetch_or(1u << stale.buffer_index);
+                    }
+                    ++stale_resources;
+                    stale = Resource{};
                 }
-                ++stale_resources;
-                stale = Resource{};
             }
 
             renderer_ready_ = false;
