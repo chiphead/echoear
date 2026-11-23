@@ -41,6 +41,9 @@ int main() {
     assert(!DlnaXml::ExtractValue(plain, "CurrentURI", value));
     assert(!DlnaXml::ExtractValue("<x:CurrentURI>broken", "CurrentURI", value));
     assert(!DlnaXml::ExtractValue("<x:CurrentURI></x:CurrentURI>", "CurrentURI", value));
+    assert(DlnaXml::ExtractValue("<x:CurrentURI></x:CurrentURI>",
+                                 "CurrentURI", value, true));
+    assert(value.empty());
     assert(!DlnaXml::ExtractValue(plain, nullptr, value));
     assert(!DlnaXml::ExtractValue(plain, "", value));
 
