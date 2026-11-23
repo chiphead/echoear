@@ -329,6 +329,8 @@ void AudioService::AudioInputTask() {
 }
 
 void AudioService::AudioOutputTask() {
+    TickType_t next_dlna_output_tick = xTaskGetTickCount();
+    bool dlna_pacing_active = false;
     while (true) {
         std::unique_lock<std::mutex> lock(audio_queue_mutex_);
         audio_queue_cv_.wait(
@@ -355,12 +357,37 @@ void AudioService::AudioOutputTask() {
             callbacks_.on_pcm_output &&
             callbacks_.on_pcm_output(task.pcm, codec_->output_sample_rate());
         if (!pcm_handled) {
+            dlna_pacing_active = false;
             if (!codec_->output_enabled()) {
                 esp_timer_stop(audio_power_timer_);
                 esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
                 codec_->EnableOutput(true);
             }
             codec_->OutputData(task.pcm);
+        } else {
+            // Unlike I2S OutputData(), a network PCM sink only copies into a
+            // bounded queue and otherwise runs as fast as packets arrive.
+            // Pace accepted DLNA frames at their decoded media duration so a
+            // fast producer cannot exhaust the three PCM accumulators before
+            // the renderer consumes the current/next WAV resources.
+            const int output_rate = codec_->output_sample_rate();
+            const int output_channels = codec_->output_channels();
+            if (output_rate > 0 && output_channels > 0) {
+                const uint64_t denominator =
+                    static_cast<uint64_t>(output_rate) * output_channels;
+                const uint32_t frame_duration_ms = static_cast<uint32_t>(
+                    (static_cast<uint64_t>(task.pcm.size()) * 1000 +
+                     denominator - 1) / denominator);
+                TickType_t frame_ticks = pdMS_TO_TICKS(frame_duration_ms);
+                if (frame_ticks == 0) frame_ticks = 1;
+                if (!dlna_pacing_active) {
+                    next_dlna_output_tick = xTaskGetTickCount();
+                    dlna_pacing_active = true;
+                }
+                vTaskDelayUntil(&next_dlna_output_tick, frame_ticks);
+            } else {
+                dlna_pacing_active = false;
+            }
         }
 
         /* Update the last output time */
