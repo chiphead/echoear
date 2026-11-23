@@ -23,10 +23,12 @@ public:
     static bool SetUriAndPlay(const DlnaRenderer& renderer,
                               const std::string& media_uri,
                               const std::string& title,
+                              uint32_t duration_ms,
                               uint32_t timeout_ms = 5000);
     static bool SetNextUri(const DlnaRenderer& renderer,
                            const std::string& media_uri,
                            const std::string& title,
+                           uint32_t duration_ms,
                            uint32_t timeout_ms = 5000);
     static bool Stop(const DlnaRenderer& renderer, uint32_t timeout_ms = 5000);
     static bool GetTransportState(const DlnaRenderer& renderer,
