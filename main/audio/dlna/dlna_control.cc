@@ -178,8 +178,8 @@ bool DlnaControl::GetTransportState(const DlnaRenderer& renderer,
         return false;
     }
     if (raw == "PLAYING") state = DlnaTransportState::kPlaying;
-    else if (raw == "STOPPED" || raw == "NO_MEDIA_PRESENT")
-        state = DlnaTransportState::kStopped;
+    else if (raw == "STOPPED") state = DlnaTransportState::kStopped;
+    else if (raw == "NO_MEDIA_PRESENT") state = DlnaTransportState::kNoMediaPresent;
     else if (raw == "PAUSED_PLAYBACK" || raw == "PAUSED_RECORDING")
         state = DlnaTransportState::kPaused;
     else if (raw == "TRANSITIONING")
