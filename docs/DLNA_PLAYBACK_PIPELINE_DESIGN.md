@@ -104,7 +104,7 @@ The existing implementation has SCPD capability detection but still uses a singl
 
 - Added `DlnaResourceRegistry` as a bounded two-entry ownership primitive.
 - `Publish()` transfers WAV-buffer ownership only on success and creates a generation/sequence URL path.
-- `Acquire()/Release()` protect bytes while an HTTP handler is reading them.
+- `Acquire()/Release()` protect bytes while an HTTP handler is reading them. Each concurrent acquisition receives a distinct lease token (bounded to eight active handlers), so a duplicate release cannot consume another handler's reference.
 - `Retire()` prevents new acquisitions and defers freeing until outstanding leases reach zero.
 - The new source is included only in the Waveshare 1.32 DLNA board build.
 
