@@ -208,7 +208,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
     if (samples == nullptr || sample_count == 0) return false;
 
     std::lock_guard<std::mutex> lock(buffer_mutex_);
-    if (discard_until_drain_ || utterance_dropping_) return true;
+    if (discard_until_drain_) return true;
     if (end_pending_) {
         const TickType_t silence_ticks = pdMS_TO_TICKS(kEndSilenceGraceMs);
         if ((xTaskGetTickCount() - end_pending_tick_) >= silence_ticks) {
@@ -221,6 +221,10 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
             end_pending_ = false;
         }
     }
+    // Check the pending utterance boundary before the drop latch: if a new
+    // utterance arrives after the grace period, finalize/reset the failed
+    // predecessor and accept this first frame as a fresh routing decision.
+    if (utterance_dropping_) return true;
     if (channels < 1 || channels > 2 ||
         sample_count % static_cast<size_t>(channels) != 0) {
         if (utterance_decided_ && !fallback_utterance_) {
