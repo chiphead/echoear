@@ -495,6 +495,8 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         bool published = false;
         bool next_action_attempted = false;
         bool next_action_sent = false;
+        TickType_t next_action_sent_at = 0;
+        bool next_uri_observed = false;
     };
 
     auto recycle_buffer = [this](uint8_t index) {
@@ -637,7 +639,12 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         if (have_next && next.published && next.next_action_sent) {
             std::string renderer_uri;
             if (DlnaControl::GetCurrentUri(renderer_, renderer_uri, 1500)) {
-                next_is_current = renderer_uri == next.uri && state_ok &&
+                const bool uri_matches_next = renderer_uri == next.uri;
+                if (uri_matches_next && !next.next_uri_observed) {
+                    next.next_uri_observed = true;
+                    ESP_LOGI(kTag, "Renderer CurrentURI now references preloaded item; waiting for playback state");
+                }
+                next_is_current = uri_matches_next && state_ok &&
                                   transport == DlnaTransportState::kPlaying;
             }
         }
@@ -658,6 +665,9 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             next.next_action_attempted = true;
             next.next_action_sent = DlnaControl::SetNextUri(
                 renderer_, next.uri, "EchoEar audio", kControlTimeoutMs);
+            if (next.next_action_sent) {
+                next.next_action_sent_at = xTaskGetTickCount();
+            }
             if (!next.next_action_sent) {
                 ESP_LOGW(kTag, "SetNext rejected; sequential fallback retained");
             }
@@ -724,8 +734,21 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                 // resources alive and retry CurrentURI observation before
                 // forcing sequential playback, avoiding an accidental replay.
                 if (next.next_action_sent) {
-                    if (stopped_since == 0) stopped_since = xTaskGetTickCount();
-                    if ((xTaskGetTickCount() - stopped_since) < pdMS_TO_TICKS(2000)) {
+                    const TickType_t now = xTaskGetTickCount();
+                    const bool renderer_reports_transition =
+                        state_ok && transport == DlnaTransportState::kTransitioning;
+                    const bool next_transition_in_progress =
+                        renderer_reports_transition || next.next_uri_observed;
+                    if (next_transition_in_progress &&
+                        (now - next.next_action_sent_at) < pdMS_TO_TICKS(10000)) {
+                        // Some renderers update CurrentURI before reporting
+                        // PLAYING, or expose a TRANSITIONING/STOPPED interval.
+                        // Do not overwrite that accepted next item with a
+                        // second SetAVTransportURI while it is starting.
+                        continue;
+                    }
+                    if (stopped_since == 0) stopped_since = now;
+                    if ((now - stopped_since) < pdMS_TO_TICKS(2000)) {
                         continue;
                     }
                 }
