@@ -169,11 +169,19 @@ void DlnaPlaybackManager::NotifyNetworkDisconnected() {
 
 bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
                                    int sample_rate, int channels) {
-    if (samples == nullptr || sample_count == 0 || channels < 1 || channels > 2 ||
-        sample_count % static_cast<size_t>(channels) != 0) return false;
+    if (samples == nullptr || sample_count == 0) return false;
 
     std::lock_guard<std::mutex> lock(buffer_mutex_);
     if (discard_until_drain_) return true;
+    if (channels < 1 || channels > 2 ||
+        sample_count % static_cast<size_t>(channels) != 0) {
+        if (utterance_decided_ && !fallback_utterance_) {
+            buffer_dropping_[write_buffer_index_] = true;
+            ESP_LOGW(kTag, "Invalid PCM frame; dropping the remainder of the DLNA utterance");
+            return true;
+        }
+        return false;
+    }
     if (utterance_decided_ && fallback_utterance_) return false;
     bool new_utterance = false;
     if (!utterance_decided_) {
