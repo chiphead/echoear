@@ -263,3 +263,10 @@ AVTransport SOAP escaping and response extraction now share the header-only `dln
 - The first PCM frame of each utterance now requires all of: a live resource queue, `sink_ready_`, `network_available_`, and `!network_lost_`. If any condition is false, the entire utterance is routed to the local codec rather than entering a stale DLNA session.
 - Once an utterance has committed to DLNA, the existing discard-until-drain behavior still prevents mid-utterance local/DLNA mixing after a disconnect.
 - This is a defensive routing gate. It does not prove reconnect behavior on hardware; discovery completion racing with network loss still requires an on-device exercise.
+
+## Do not publish a discovery result after its network session is invalidated
+
+- SSDP discovery, device-description download, and optional AVTransport SCPD download are blocking network operations. A disconnect can be reported while `FindSonyRenderer()` is in progress.
+- The worker now refuses to start discovery while `network_lost_` is set, validates the session again after discovery returns, and clears `sink_ready_` if a disconnect raced with publishing that readiness result.
+- Resource dequeue also requires `!network_lost_` before entering `ProcessResource()`. Generation checks remain the final guard for resources queued before a disconnect.
+- This closes the stale-discovery readiness race at the worker boundary; it does not make the underlying HTTP requests cancellable. A disconnect during discovery is handled after the bounded request/discovery calls return.
