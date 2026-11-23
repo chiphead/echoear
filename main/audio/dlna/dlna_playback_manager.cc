@@ -279,13 +279,19 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
 
     uint8_t index = write_buffer_index_;
     if (!buffer_ready_[index]) {
-        if (utterance_decided_ && !fallback_utterance_) {
-            buffer_dropping_[index] = true;
-            ESP_LOGW(kTag, "No free PCM buffer; dropping remaining frames of current DLNA utterance");
-            return true;
+        const int available = FindReadyBufferLocked(index);
+        if (available >= 0) {
+            index = static_cast<uint8_t>(available);
+            write_buffer_index_ = index;
+        } else {
+            if (utterance_decided_ && !fallback_utterance_) {
+                buffer_dropping_[index] = true;
+                ESP_LOGW(kTag, "No free PCM buffer; dropping remaining frames of current DLNA utterance");
+                return true;
+            }
+            fallback_utterance_ = true;
+            return false;
         }
-        fallback_utterance_ = true;
-        return false;
     }
 
     if (buffer_dropping_[index]) return true;
@@ -310,13 +316,13 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
                 ESP_LOGE(kTag, "DLNA segment queue/buffer unavailable; dropping utterance tail");
                 return true;
             }
-            const uint8_t other = static_cast<uint8_t>((index + 1) % kBufferCount);
-            if (!buffer_ready_[other]) {
+            const int available = FindReadyBufferLocked(index);
+            if (available < 0) {
                 buffer_dropping_[index] = true;
                 ESP_LOGE(kTag, "No free PCM buffer for next DLNA segment; dropping utterance tail");
                 return true;
             }
-            index = other;
+            index = static_cast<uint8_t>(available);
             write_buffer_index_ = index;
             if (!buffers_[index].Begin(sample_rate, channels)) {
                 buffer_dropping_[index] = true;
@@ -340,13 +346,13 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
                 ESP_LOGE(kTag, "Could not queue completed DLNA segment");
                 return true;
             }
-            const uint8_t other = static_cast<uint8_t>((index + 1) % kBufferCount);
-            if (!buffer_ready_[other]) {
+            const int available = FindReadyBufferLocked(index);
+            if (available < 0) {
                 buffer_dropping_[index] = true;
                 ESP_LOGE(kTag, "No free PCM buffer for next DLNA segment; dropping utterance tail");
                 return true;
             }
-            index = other;
+            index = static_cast<uint8_t>(available);
             write_buffer_index_ = index;
             if (!buffers_[index].Begin(sample_rate, channels)) {
                 buffer_dropping_[index] = true;
@@ -358,6 +364,15 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
     return true;
 }
 
+
+int DlnaPlaybackManager::FindReadyBufferLocked(uint8_t after_index) const {
+    for (size_t offset = 1; offset <= kBufferCount; ++offset) {
+        const uint8_t candidate = static_cast<uint8_t>(
+            (static_cast<size_t>(after_index) + offset) % kBufferCount);
+        if (buffer_ready_[candidate]) return candidate;
+    }
+    return -1;
+}
 
 bool DlnaPlaybackManager::QueueSegmentLocked(uint8_t index) {
     if (index >= kBufferCount || !buffer_ready_[index] || !buffer_active_[index]) return false;
@@ -406,12 +421,14 @@ void DlnaPlaybackManager::EndUtterance() {
             return;
         }
         if (buffer_active_[index] && buffer_ready_[index]) {
-            QueueSegmentLocked(index);
+            if (!QueueSegmentLocked(index)) {
+                ESP_LOGW(kTag, "Could not publish final DLNA segment");
+            }
         }
         utterance_decided_ = false;
         fallback_utterance_ = false;
-        const uint8_t other = static_cast<uint8_t>((index + 1) % kBufferCount);
-        if (buffer_ready_[other]) write_buffer_index_ = other;
+        const int available = FindReadyBufferLocked(index);
+        if (available >= 0) write_buffer_index_ = static_cast<uint8_t>(available);
     }
 
 }
