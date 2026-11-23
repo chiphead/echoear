@@ -2,6 +2,7 @@
 #include "dlna_resource_registry.h"
 #include "dlna_http_range.h"
 
+#include <algorithm>
 #include <climits>
 #include <string>
 
@@ -12,6 +13,56 @@ namespace {
 constexpr char kTag[] = "DlnaMediaServer";
 constexpr char kMediaPath[] = "/dlna/audio.wav";
 constexpr char kResourceWildcard[] = "/dlna/*";
+
+constexpr int64_t kHttpSendDeadlineUs = 5 * 1000 * 1000;
+constexpr size_t kHttpSendChunkBytes = 4096;
+
+// HTTPD executes ordinary URI handlers serially. Bound the complete response,
+// not only each socket send(), so a slow client cannot pin a resource lease and
+// stall subsequent media requests indefinitely.
+bool SendAllWithDeadline(httpd_req_t* request, const char* data, size_t size,
+                         int64_t deadline_us) {
+    size_t offset = 0;
+    while (offset < size) {
+        if (esp_timer_get_time() >= deadline_us) return false;
+        const size_t chunk = std::min(size - offset, kHttpSendChunkBytes);
+        const int sent = httpd_send(request, data + offset, chunk);
+        if (sent <= 0) return false;
+        offset += static_cast<size_t>(sent);
+    }
+    return true;
+}
+
+esp_err_t SendHttpResponse(httpd_req_t* request, const char* status,
+                           const char* content_type, size_t content_length,
+                           const char* body, size_t body_length,
+                           const char* content_range = nullptr,
+                           bool accept_ranges = false) {
+    std::string headers = "HTTP/1.1 ";
+    headers += status;
+    headers += "\r\nContent-Type: ";
+    headers += content_type;
+    headers += "\r\nContent-Length: ";
+    headers += std::to_string(content_length);
+    headers += "\r\n";
+    if (accept_ranges) headers += "Accept-Ranges: bytes\r\n";
+    if (content_range != nullptr) {
+        headers += "Content-Range: ";
+        headers += content_range;
+        headers += "\r\n";
+    }
+    headers += "\r\n";
+
+    const int64_t deadline_us = esp_timer_get_time() + kHttpSendDeadlineUs;
+    if (!SendAllWithDeadline(request, headers.data(), headers.size(), deadline_us)) {
+        return ESP_FAIL;
+    }
+    if (body != nullptr && body_length > 0 &&
+        !SendAllWithDeadline(request, body, body_length, deadline_us)) {
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
 
 }  // namespace
 
@@ -33,6 +84,10 @@ bool DlnaMediaServer::Start(const std::string& host_ipv4, const uint8_t* wav_dat
     config.ctrl_port = static_cast<uint16_t>(port + 1);
     config.max_uri_handlers = 4;
     config.stack_size = 6144;
+    // Keep slow/idle clients from monopolizing the single HTTPD task.
+    config.recv_wait_timeout = 2;
+    config.send_wait_timeout = 1;
+    config.lru_purge_enable = true;
 
     if (httpd_start(&server_, &config) != ESP_OK) {
         server_ = nullptr;
@@ -85,6 +140,10 @@ bool DlnaMediaServer::Start(const std::string& host_ipv4,
     config.ctrl_port = static_cast<uint16_t>(port + 1);
     config.max_uri_handlers = 4;
     config.stack_size = 6144;
+    // Keep slow/idle clients from monopolizing the single HTTPD task.
+    config.recv_wait_timeout = 2;
+    config.send_wait_timeout = 1;
+    config.lru_purge_enable = true;
     config.uri_match_fn = httpd_uri_match_wildcard;
 
     if (httpd_start(&server_, &config) != ESP_OK) {
@@ -153,8 +212,10 @@ esp_err_t DlnaMediaServer::ServeRequest(httpd_req_t* request) {
 
         DlnaResourceView view;
         if (!registry_->Acquire(request_path, view)) {
-            httpd_resp_set_status(request, "404 Not Found");
-            return httpd_resp_send(request, "Unknown media resource", HTTPD_RESP_USE_STRLEN);
+            return SendHttpResponse(
+                request, "404 Not Found", "text/plain",
+                sizeof("Unknown media resource") - 1,
+                "Unknown media resource", sizeof("Unknown media resource") - 1);
         }
         struct LeaseGuard {
             DlnaResourceRegistry* registry;
@@ -195,15 +256,16 @@ esp_err_t DlnaMediaServer::ServeResource(httpd_req_t* request,
 
     if (data == nullptr || size == 0) {
         if (request->method == HTTP_HEAD) {
-            const esp_err_t result = SendHeadResponse(
+            const esp_err_t result = SendHttpResponse(
                 request, "503 Service Unavailable", "text/plain",
-                sizeof("No audio resource") - 1);
+                sizeof("No audio resource") - 1, nullptr, 0);
             log_result(503, 0);
             return result;
         }
-        httpd_resp_set_status(request, "503 Service Unavailable");
-        const esp_err_t result =
-            httpd_resp_send(request, "No audio resource", HTTPD_RESP_USE_STRLEN);
+        const esp_err_t result = SendHttpResponse(
+            request, "503 Service Unavailable", "text/plain",
+            sizeof("No audio resource") - 1,
+            "No audio resource", sizeof("No audio resource") - 1);
         log_result(503, 0);
         return result;
     }
@@ -219,16 +281,18 @@ esp_err_t DlnaMediaServer::ServeResource(httpd_req_t* request,
                                         range.size()) != ESP_OK) {
             const std::string content_range = "bytes */" + std::to_string(size);
             if (request->method == HTTP_HEAD) {
-                const esp_err_t result = SendHeadResponse(
+                const esp_err_t result = SendHttpResponse(
                     request, "416 Range Not Satisfiable", "text/plain",
-                    sizeof("Invalid Range") - 1, content_range.c_str());
+                    sizeof("Invalid Range") - 1, nullptr, 0,
+                    content_range.c_str());
                 log_result(416, 0);
                 return result;
             }
-            httpd_resp_set_status(request, "416 Range Not Satisfiable");
-            httpd_resp_set_hdr(request, "Content-Range", content_range.c_str());
-            const esp_err_t result =
-                httpd_resp_send(request, "Invalid Range", HTTPD_RESP_USE_STRLEN);
+            const esp_err_t result = SendHttpResponse(
+                request, "416 Range Not Satisfiable", "text/plain",
+                sizeof("Invalid Range") - 1,
+                "Invalid Range", sizeof("Invalid Range") - 1,
+                content_range.c_str());
             log_result(416, 0);
             return result;
         }
@@ -237,16 +301,18 @@ esp_err_t DlnaMediaServer::ServeResource(httpd_req_t* request,
         if (range_result == DlnaHttpRange::Result::kUnsatisfiable) {
             const std::string content_range = "bytes */" + std::to_string(size);
             if (request->method == HTTP_HEAD) {
-                const esp_err_t result = SendHeadResponse(
+                const esp_err_t result = SendHttpResponse(
                     request, "416 Range Not Satisfiable", "text/plain",
-                    sizeof("Invalid Range") - 1, content_range.c_str());
+                    sizeof("Invalid Range") - 1, nullptr, 0,
+                    content_range.c_str());
                 log_result(416, 0);
                 return result;
             }
-            httpd_resp_set_status(request, "416 Range Not Satisfiable");
-            httpd_resp_set_hdr(request, "Content-Range", content_range.c_str());
-            const esp_err_t result =
-                httpd_resp_send(request, "Invalid Range", HTTPD_RESP_USE_STRLEN);
+            const esp_err_t result = SendHttpResponse(
+                request, "416 Range Not Satisfiable", "text/plain",
+                sizeof("Invalid Range") - 1,
+                "Invalid Range", sizeof("Invalid Range") - 1,
+                content_range.c_str());
             log_result(416, 0);
             return result;
         }
@@ -267,27 +333,24 @@ esp_err_t DlnaMediaServer::ServeResource(httpd_req_t* request,
             content_range = "bytes " + std::to_string(first) + "-" +
                             std::to_string(last) + "/" + std::to_string(size);
         }
-        const esp_err_t result = SendHeadResponse(
+        const esp_err_t result = SendHttpResponse(
             request, partial ? "206 Partial Content" : "200 OK",
-            "audio/wav", length,
+            "audio/wav", length, nullptr, 0,
             partial ? content_range.c_str() : nullptr, true);
         log_result(partial ? 206 : 200, 0);
         return result;
     }
 
-    httpd_resp_set_type(request, "audio/wav");
-    httpd_resp_set_hdr(request, "Accept-Ranges", "bytes");
+    std::string content_range;
     if (partial) {
-        httpd_resp_set_status(request, "206 Partial Content");
-        const std::string content_range =
-            "bytes " + std::to_string(first) + "-" + std::to_string(last) +
-            "/" + std::to_string(size);
-        httpd_resp_set_hdr(request, "Content-Range", content_range.c_str());
+        content_range = "bytes " + std::to_string(first) + "-" +
+                        std::to_string(last) + "/" + std::to_string(size);
     }
-
-    const esp_err_t result = httpd_resp_send(
-        request, reinterpret_cast<const char*>(data + first),
-        static_cast<ssize_t>(length));
+    const esp_err_t result = SendHttpResponse(
+        request, partial ? "206 Partial Content" : "200 OK",
+        "audio/wav", length,
+        reinterpret_cast<const char*>(data + first), length,
+        partial ? content_range.c_str() : nullptr, true);
     if (result != ESP_OK) {
         ESP_LOGW(kTag, "Failed to send media bytes %u..%u",
                  static_cast<unsigned>(first), static_cast<unsigned>(last));
