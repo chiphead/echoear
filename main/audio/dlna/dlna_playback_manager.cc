@@ -492,6 +492,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         TickType_t started = 0;
         uint32_t duration_ms = 0;
         bool observed_playing = false;
+        bool published = false;
         bool next_action_attempted = false;
         bool next_action_sent = false;
     };
@@ -550,14 +551,23 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         item.duration_ms = byte_rate == 0 ? 0 : static_cast<uint32_t>(
             (static_cast<uint64_t>(data_size) * 1000) / byte_rate);
         item.resource.wav_data = nullptr;  // Registry owns it from here.
+        item.published = true;
         return true;
     };
 
     Item current{};
     current.resource = first_resource;
-    if (!publish_item(current)) {
+    bool current_published = false;
+    for (int attempt = 0; attempt < 20 && !stopping_.load() &&
+         network_available_.load() && !network_lost_.load() &&
+         current.resource.utterance_generation == utterance_generation_.load(); ++attempt) {
+        current_published = publish_item(current);
+        if (current_published) break;
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    if (!current_published) {
         heap_caps_free(current.resource.wav_data);
-        ESP_LOGE(kTag, "Could not publish initial WAV resource");
+        ESP_LOGE(kTag, "Could not publish initial WAV resource after bounded retries");
         return;
     }
     if (!DlnaControl::SetUriAndPlay(renderer_, current.uri,
@@ -586,16 +596,17 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                 if (queued.wav_data != nullptr) {
                     if (queued.utterance_generation != utterance_generation_.load()) {
                         heap_caps_free(queued.wav_data);
-                    } else {
+                    } else if (queued.wav_size >= 44) {
                         next.resource = queued;
+                        have_next = true;
                         if (publish_item(next)) {
-                            have_next = true;
                             ESP_LOGI(kTag, "Prepared next DLNA item %s", next.uri.c_str());
                         } else {
-                            heap_caps_free(next.resource.wav_data);
-                            next = Item{};
-                            ESP_LOGW(kTag, "Could not publish look-ahead item");
+                            ESP_LOGW(kTag, "Registry is busy; retaining look-ahead WAV until a slot is free");
                         }
+                    } else {
+                        heap_caps_free(queued.wav_data);
+                        ESP_LOGW(kTag, "Discarded malformed queued WAV resource");
                     }
                 }
             }
@@ -605,6 +616,12 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
 
         if (stopping_.load() || !network_available_.load() || network_lost_.load() ||
             current.resource.utterance_generation != utterance_generation_.load()) break;
+
+        if (have_next && !next.published) {
+            if (publish_item(next)) {
+                ESP_LOGI(kTag, "Published retained look-ahead item %s", next.uri.c_str());
+            }
+        }
 
         if (xTaskGetTickCount() < next_poll) continue;
         next_poll = xTaskGetTickCount() + pdMS_TO_TICKS(650);
@@ -617,7 +634,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         }
 
         bool next_is_current = false;
-        if (have_next && next.next_action_sent) {
+        if (have_next && next.published && next.next_action_sent) {
             std::string renderer_uri;
             if (DlnaControl::GetCurrentUri(renderer_, renderer_uri, 1500)) {
                 next_is_current = renderer_uri == next.uri && state_ok &&
@@ -636,7 +653,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             continue;
         }
 
-        if (have_next && current.observed_playing && !next.next_action_attempted &&
+        if (have_next && next.published && current.observed_playing && !next.next_action_attempted &&
             renderer_.supports_set_next_av_transport_uri) {
             next.next_action_attempted = true;
             next.next_action_sent = DlnaControl::SetNextUri(
@@ -653,7 +670,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         const bool stopped_after_play = state_ok &&
             transport == DlnaTransportState::kStopped && current.observed_playing;
         if (stopped_after_play || duration_expired) {
-            if (have_next) {
+            if (have_next && next.published) {
                 // A successful SetNext may have transitioned while the
                 // transport-state query briefly reports STOPPED. Keep both
                 // resources alive and retry CurrentURI observation before
@@ -695,7 +712,10 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         DlnaControl::Stop(renderer_, kControlTimeoutMs);
     }
     resource_registry_.Retire(current.path);
-    if (have_next) resource_registry_.Retire(next.path);
+    if (have_next) {
+        if (next.published) resource_registry_.Retire(next.path);
+        else if (next.resource.wav_data != nullptr) heap_caps_free(next.resource.wav_data);
+    }
 }
 
 void DlnaPlaybackManager::Worker() {
