@@ -277,30 +277,9 @@ esp_err_t DlnaMediaServer::ServeResource(httpd_req_t* request,
     size_t last = size - 1;
     bool partial = false;
 
-    const size_t range_len = httpd_req_get_hdr_value_len(request, "Range");
-    if (range_len > 0) {
-        std::string range(range_len + 1, '\0');
-        if (httpd_req_get_hdr_value_str(request, "Range", range.data(),
-                                        range.size()) != ESP_OK) {
-            const std::string content_range = "bytes */" + std::to_string(size);
-            if (request->method == HTTP_HEAD) {
-                const esp_err_t result = SendHttpResponse(
-                    request, "416 Range Not Satisfiable", "text/plain",
-                    sizeof("Invalid Range") - 1, nullptr, 0,
-                    content_range.c_str());
-                log_result(416, 0);
-                return result;
-            }
-            const esp_err_t result = SendHttpResponse(
-                request, "416 Range Not Satisfiable", "text/plain",
-                sizeof("Invalid Range") - 1,
-                "Invalid Range", sizeof("Invalid Range") - 1,
-                content_range.c_str());
-            log_result(416, 0);
-            return result;
-        }
-        range.resize(std::char_traits<char>::length(range.c_str()));
-        const auto range_result = DlnaHttpRange::Parse(range, size, first, last);
+    if (!request_range.empty()) {
+        const auto range_result =
+            DlnaHttpRange::Parse(request_range, size, first, last);
         if (range_result == DlnaHttpRange::Result::kUnsatisfiable) {
             const std::string content_range = "bytes */" + std::to_string(size);
             if (request->method == HTTP_HEAD) {
