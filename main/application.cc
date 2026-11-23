@@ -88,6 +88,11 @@ void Application::Initialize() {
     callbacks.on_vad_change = [this](bool speaking) {
         xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
     };
+#if CONFIG_DLNA_AUDIO_OUTPUT
+    callbacks.on_playback_aborted = [this]() {
+        dlna_playback_manager_.AbortUtterance();
+    };
+#endif
     callbacks.on_playback_drained = [this]() {
 #if CONFIG_DLNA_AUDIO_OUTPUT
         // The callback runs after AudioOutputTask has emitted every queued PCM
