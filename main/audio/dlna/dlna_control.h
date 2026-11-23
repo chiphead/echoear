@@ -34,4 +34,9 @@ public:
                                   uint32_t timeout_ms = 3000);
     static bool GetCurrentUri(const DlnaRenderer& renderer, std::string& uri,
                               uint32_t timeout_ms = 3000);
+    static bool GetPositionInfo(const DlnaRenderer& renderer,
+                                std::string& track_duration,
+                                std::string& relative_time,
+                                std::string& track_uri,
+                                uint32_t timeout_ms = 3000);
 };
