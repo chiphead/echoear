@@ -107,13 +107,15 @@ bool Invoke(const DlnaRenderer& renderer, const char* action,
 bool DlnaControl::SetUriAndPlay(const DlnaRenderer& renderer,
                                 const std::string& media_uri,
                                 const std::string& title,
+                                uint32_t duration_ms,
                                 uint32_t timeout_ms) {
     if (media_uri.empty()) {
         ESP_LOGE(kTag, "Media URI is empty");
         return false;
     }
 
-    const std::string metadata = DlnaXml::BuildDidlMetadata(media_uri, title);
+    const std::string metadata =
+        DlnaXml::BuildDidlMetadata(media_uri, title, duration_ms);
 
     const std::string set_uri_args =
         "<InstanceID>0</InstanceID><CurrentURI>" + DlnaXml::Escape(media_uri) +
@@ -128,13 +130,15 @@ bool DlnaControl::SetUriAndPlay(const DlnaRenderer& renderer,
 bool DlnaControl::SetNextUri(const DlnaRenderer& renderer,
                              const std::string& media_uri,
                              const std::string& title,
+                             uint32_t duration_ms,
                              uint32_t timeout_ms) {
     if (!renderer.supports_set_next_av_transport_uri || media_uri.empty()) {
         ESP_LOGW(kTag, "Renderer does not advertise SetNextAVTransportURI");
         return false;
     }
 
-    const std::string metadata = DlnaXml::BuildDidlMetadata(media_uri, title);
+    const std::string metadata =
+        DlnaXml::BuildDidlMetadata(media_uri, title, duration_ms);
 
     const std::string arguments =
         "<InstanceID>0</InstanceID><NextURI>" + DlnaXml::Escape(media_uri) +
