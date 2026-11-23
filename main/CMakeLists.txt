@@ -1367,9 +1367,14 @@ function(build_default_assets_bin)
         list(APPEND DEFAULT_ASSETS_DEPENDENCIES ${DEFAULT_EMOJI_FILES})
     endif()
 
-    # Add default assets extra files if defined
+    # Add default assets extra files if defined. Track every file so changes
+    # to GIFs or other board-specific assets regenerate generated_assets.bin.
     if(DEFAULT_ASSETS_EXTRA_FILES)
         list(APPEND BUILD_ARGS "--extra_files" "${DEFAULT_ASSETS_EXTRA_FILES}")
+        file(GLOB_RECURSE DEFAULT_EXTRA_ASSET_FILES CONFIGURE_DEPENDS
+            "${DEFAULT_ASSETS_EXTRA_FILES}/*"
+        )
+        list(APPEND DEFAULT_ASSETS_DEPENDENCIES ${DEFAULT_EXTRA_ASSET_FILES})
     endif()
 
     list(APPEND BUILD_ARGS "--esp_sr_model_path" "${ESP_SR_MODEL_PATH}")
