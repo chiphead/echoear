@@ -14,6 +14,9 @@
 
 #include <driver/gpio.h>
 #include <esp_log.h>
+#if CONFIG_DLNA_AUDIO_OUTPUT
+#include <esp_netif.h>
+#endif
 #include <arpa/inet.h>
 #include <cJSON.h>
 #include <cstring>
@@ -86,8 +89,19 @@ void Application::Initialize() {
         xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
     };
     callbacks.on_playback_drained = [this]() {
+#if CONFIG_DLNA_AUDIO_OUTPUT
+        // The callback runs after AudioOutputTask has emitted every queued PCM
+        // frame. Finalize only the WAV header here; network work stays in worker.
+        dlna_playback_manager_.EndUtterance();
+#endif
         xEventGroupSetBits(event_group_, MAIN_EVENT_PLAYBACK_DRAINED);
     };
+#if CONFIG_DLNA_AUDIO_OUTPUT
+    callbacks.on_pcm_output = [this, codec](const std::vector<int16_t>& pcm, int sample_rate) {
+        return dlna_playback_manager_.WritePcm(
+            pcm.data(), pcm.size(), sample_rate, codec->output_channels());
+    };
+#endif
     callbacks.on_playback_progress = [this](uint32_t playback_id, uint32_t media_position_ms) {
         notify_player_.OnPlaybackProgress(playback_id, media_position_ms);
     };
@@ -288,6 +302,20 @@ void Application::Run() {
 
 void Application::HandleNetworkConnectedEvent() {
     ESP_LOGI(TAG, "Network connected");
+#if CONFIG_DLNA_AUDIO_OUTPUT
+    esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t ip_info{};
+    char host_ipv4[16] = {};
+    if (netif != nullptr && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK &&
+        ip_info.ip.addr != 0 && inet_ntop(AF_INET, &ip_info.ip, host_ipv4,
+                                         sizeof(host_ipv4)) != nullptr) {
+        if (!dlna_playback_manager_.Start(host_ipv4)) {
+            ESP_LOGE(TAG, "Failed to start DLNA audio output manager");
+        }
+    } else {
+        ESP_LOGW(TAG, "DLNA output not started: Wi-Fi IPv4 address unavailable");
+    }
+#endif
     auto state = GetDeviceState();
 
     if (state == kDeviceStateStarting || state == kDeviceStateWifiConfiguring) {
