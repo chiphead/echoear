@@ -653,6 +653,16 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             transport == DlnaTransportState::kStopped && current.observed_playing;
         if (stopped_after_play || duration_expired) {
             if (have_next) {
+                // A successful SetNext may have transitioned while the
+                // transport-state query briefly reports STOPPED. Keep both
+                // resources alive and retry CurrentURI observation before
+                // forcing sequential playback, avoiding an accidental replay.
+                if (next.next_action_sent) {
+                    if (stopped_since == 0) stopped_since = xTaskGetTickCount();
+                    if ((xTaskGetTickCount() - stopped_since) < pdMS_TO_TICKS(2000)) {
+                        continue;
+                    }
+                }
                 if (DlnaControl::SetUriAndPlay(renderer_, next.uri,
                                                "EchoEar audio", kControlTimeoutMs)) {
                     resource_registry_.Retire(current.path);
