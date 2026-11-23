@@ -637,6 +637,14 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         ESP_LOGE(kTag, "Could not publish initial WAV resource after bounded retries");
         return;
     }
+    // A disconnect can invalidate the queued generation while this worker is
+    // publishing the WAV. Recheck immediately before changing AVTransport so
+    // stale audio is not started after the network-loss notification.
+    if (stopping_.load() || !network_available_.load() || network_lost_.load() ||
+        current.resource.utterance_generation != utterance_generation_.load()) {
+        resource_registry_.Retire(current.path);
+        return;
+    }
     if (!DlnaControl::SetUriAndPlay(renderer_, current.uri,
                                     "EchoEar audio", kControlTimeoutMs)) {
         // SetUriAndPlay() is a two-step operation. SetAVTransportURI may have
@@ -668,6 +676,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
     TickType_t stopped_since = 0;
     TickType_t next_current_uri_poll = xTaskGetTickCount();
     TickType_t fallback_uri_unconfirmed_since = 0;
+    bool fallback_uri_unconfirmed = false;
     uint8_t unexpected_uri_mismatch_count = 0;
 
     while (!stopping_.load() && network_available_.load() &&
@@ -825,6 +834,10 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                 }
             } else {
                 unexpected_uri_mismatch_count = 0;
+                if (stopping_.load() || !network_available_.load() || network_lost_.load() ||
+                    current.resource.utterance_generation != utterance_generation_.load()) {
+                    break;
+                }
                 next.next_action_attempted = true;
                 const bool next_action_response_ok = DlnaControl::SetNextUri(
                     renderer_, next.uri, "EchoEar audio", kControlTimeoutMs);
@@ -969,8 +982,9 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                 std::string renderer_uri_before_fallback;
                 if (!DlnaControl::GetCurrentUri(renderer_, renderer_uri_before_fallback, 1500)) {
                     const TickType_t now = xTaskGetTickCount();
-                    if (fallback_uri_unconfirmed_since == 0) {
+                    if (!fallback_uri_unconfirmed) {
                         fallback_uri_unconfirmed_since = now;
+                        fallback_uri_unconfirmed = true;
                     }
                     ESP_LOGW(kTag, "Deferring sequential fallback: CurrentURI could not be confirmed");
                     if ((now - fallback_uri_unconfirmed_since) >= pdMS_TO_TICKS(10000)) {
@@ -980,6 +994,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                     continue;
                 }
                 fallback_uri_unconfirmed_since = 0;
+                fallback_uri_unconfirmed = false;
                 const bool fallback_uri_is_expected =
                     renderer_uri_before_fallback == current.uri ||
                     (next.next_action_maybe_accepted &&
@@ -998,6 +1013,10 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                     continue;
                 }
                 unexpected_uri_mismatch_count = 0;
+                if (stopping_.load() || !network_available_.load() || network_lost_.load() ||
+                    current.resource.utterance_generation != utterance_generation_.load()) {
+                    break;
+                }
                 if (DlnaControl::SetUriAndPlay(renderer_, next.uri,
                                                "EchoEar audio", kControlTimeoutMs)) {
                     resource_registry_.Retire(current.path);
