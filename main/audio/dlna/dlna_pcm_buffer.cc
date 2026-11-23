@@ -74,8 +74,6 @@ bool DlnaPcmBuffer::Append(const int16_t* samples, size_t sample_count) {
         return false;
     }
     if (sample_count > (max_pcm_bytes_ - pcm_size_) / sizeof(int16_t)) {
-        ESP_LOGW(kTag, "PCM utterance exceeded configured buffer limit (%u bytes)",
-                 static_cast<unsigned>(max_pcm_bytes_));
         active_ = false;
         return false;
     }
@@ -121,10 +119,7 @@ bool DlnaPcmBuffer::FinalizeWav(uint8_t** wav_data, size_t* wav_size) {
     *wav_size = kWavHeaderSize + pcm_size_;
     pcm_data_ = nullptr;  // Ownership transfers to the caller (heap_caps_free).
     active_ = false;
-    ESP_LOGI(kTag, "Finalized PCM utterance: %u Hz, %d channel(s), %u PCM bytes",
-             static_cast<unsigned>(sample_rate_), channels_,
-             static_cast<unsigned>(pcm_size_));
-    return true;
+        return true;
 }
 
 void DlnaPcmBuffer::Reset() {
