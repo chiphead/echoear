@@ -8,6 +8,7 @@ on:
       - "main/audio/dlna/**"
       - "main/audio/audio_service.cc"
       - "main/audio/audio_service.h"
+      - "main/application.cc"
       - "scripts/tests/test_dlna_*.py"
       - "main/CMakeLists.txt"
       - "main/idf_component.yml"
@@ -20,6 +21,7 @@ on:
       - "main/audio/dlna/**"
       - "main/audio/audio_service.cc"
       - "main/audio/audio_service.h"
+      - "main/application.cc"
       - "scripts/tests/test_dlna_*.py"
       - "main/CMakeLists.txt"
       - "main/idf_component.yml"
@@ -28,6 +30,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: dlna-host-tests-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   resource-registry:
