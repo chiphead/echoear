@@ -6,6 +6,8 @@ on:
       - feature/dlna-sony-x88-audio
     paths:
       - "main/audio/dlna/**"
+      - "main/audio/audio_service.cc"
+      - "main/audio/audio_service.h"
       - "scripts/tests/test_dlna_*.py"
       - "main/CMakeLists.txt"
       - "main/idf_component.yml"
@@ -16,6 +18,8 @@ on:
       - feature/dlna-sony-x88-audio
     paths:
       - "main/audio/dlna/**"
+      - "main/audio/audio_service.cc"
+      - "main/audio/audio_service.h"
       - "scripts/tests/test_dlna_*.py"
       - "main/CMakeLists.txt"
       - "main/idf_component.yml"
