@@ -50,6 +50,7 @@ if(CONFIG_BOARD_TYPE_ECHOEAR_WAVESHARE_1_32)
         "audio/dlna/dlna_device_description.cc"
         "audio/dlna/dlna_control.cc"
         "audio/dlna/dlna_media_server.cc"
+        "audio/dlna/dlna_pcm_buffer.cc"
         "audio/dlna/dlna_smoke_test.cc"
     )
 endif()
