@@ -9,6 +9,7 @@
 #include <string>
 
 #include <esp_log.h>
+#include <esp_timer.h>
 
 namespace {
 constexpr char kTag[] = "DlnaMediaServer";
@@ -246,7 +247,28 @@ esp_err_t DlnaMediaServer::ServeResource(httpd_req_t* request,
                                          const uint8_t* data, size_t size,
                                          const char* path) {
     const char* method = request->method == HTTP_HEAD ? "HEAD" : "GET";
-    ESP_LOGI(kTag, "Renderer requested %s %s", method, path);
+    const int64_t request_started_us = esp_timer_get_time();
+    size_t range_header_len = httpd_req_get_hdr_value_len(request, "Range");
+    std::string request_range;
+    if (range_header_len > 0) {
+        request_range.resize(range_header_len + 1, '\\0');
+        if (httpd_req_get_hdr_value_str(request, "Range", request_range.data(),
+                                        request_range.size()) == ESP_OK) {
+            request_range.resize(std::char_traits<char>::length(request_range.c_str()));
+        } else {
+            request_range.clear();
+        }
+    }
+    auto log_result = [&](int status, size_t bytes) {
+        const int64_t elapsed_us = esp_timer_get_time() - request_started_us;
+        ESP_LOGI(kTag, "HTTP %s %s status=%d range=%s bytes=%u elapsed=%lldms",
+                 method, path, status,
+                 request_range.empty() ? "-" : request_range.c_str(),
+                 static_cast<unsigned>(bytes),
+                 static_cast<long long>(elapsed_us / 1000));
+    };
+    ESP_LOGI(kTag, "HTTP request %s %s range=%s",
+             method, path, request_range.empty() ? "-" : request_range.c_str());
 
     if (data == nullptr || size == 0) {
         if (request->method == HTTP_HEAD) {
@@ -298,11 +320,12 @@ esp_err_t DlnaMediaServer::ServeResource(httpd_req_t* request,
             content_range = "bytes " + std::to_string(first) + "-" +
                             std::to_string(last) + "/" + std::to_string(size);
         }
-        return SendHeadResponse(request,
-                                partial ? "206 Partial Content" : "200 OK",
-                                "audio/wav", length,
-                                partial ? content_range.c_str() : nullptr,
-                                true);
+        const esp_err_t result = SendHeadResponse(
+            request, partial ? "206 Partial Content" : "200 OK",
+            "audio/wav", length,
+            partial ? content_range.c_str() : nullptr, true);
+        log_result(partial ? 206 : 200, result == ESP_OK ? length : 0);
+        return result;
     }
 
     httpd_resp_set_type(request, "audio/wav");
@@ -321,9 +344,9 @@ esp_err_t DlnaMediaServer::ServeResource(httpd_req_t* request,
     if (result != ESP_OK) {
         ESP_LOGW(kTag, "Failed to send media bytes %u..%u",
                  static_cast<unsigned>(first), static_cast<unsigned>(last));
+        log_result(partial ? 206 : 200, 0);
     } else {
-        ESP_LOGI(kTag, "Served %u byte(s), range=%s",
-                 static_cast<unsigned>(length), partial ? "partial" : "full");
+        log_result(partial ? 206 : 200, length);
     }
     return result;
 }
