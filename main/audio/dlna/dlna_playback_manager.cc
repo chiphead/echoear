@@ -783,13 +783,16 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                               confirmed_uri == next.uri;
         }
         if (next_is_current) {
-            ESP_LOGI(kTag, "Renderer transitioned to preloaded item");
+            const int64_t transition_observed_us = esp_timer_get_time();
+            ESP_LOGI(kTag, "Renderer transitioned to preloaded item; timing pcm_to_playing=%lldms",
+                     static_cast<long long>((transition_observed_us - next.resource.first_pcm_us) / 1000));
             resource_registry_.Retire(current.path);
             current = std::move(next);
             next = Item{};
             have_next = false;
             current.started = xTaskGetTickCount();
-            current.resource.control_response_us = esp_timer_get_time();
+            current.resource.control_response_us = transition_observed_us;
+            current.playback_start_logged = true;
             current.observed_playing = state_ok && transport == DlnaTransportState::kPlaying;
             stopped_since = 0;
             unexpected_uri_mismatch_count = 0;
