@@ -351,7 +351,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
             const int available = FindReadyBufferLocked(index);
             if (available < 0) {
                 buffer_dropping_[index] = true;
-                ESP_LOGE(kTag, "No free PCM buffer for next DLNA segment; dropping utterance tail");
+                callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
             index = static_cast<uint8_t>(available);
@@ -602,6 +602,10 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         if (!have_next) {
             Resource queued{};
             if (xQueueReceive(resource_queue_, &queued, pdMS_TO_TICKS(100)) == pdTRUE) {
+                ESP_LOGI(kTag, "Dequeued look-ahead segment: %u ms, queue_depth=%u/%u",
+                         static_cast<unsigned>(queued.duration_ms),
+                         static_cast<unsigned>(uxQueueMessagesWaiting(resource_queue_)),
+                         static_cast<unsigned>(kQueueDepth));
                 recycle_buffer(queued.buffer_index);
                 if (queued.wav_data != nullptr) {
                     if (queued.utterance_generation != utterance_generation_.load()) {
