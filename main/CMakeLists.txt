@@ -419,6 +419,9 @@ elseif(CONFIG_BOARD_TYPE_ECHOEAR_WAVESHARE_1_32)
     # Fetch the pinned upstream release and extract only the original eye GIFs.
     # The release's 1.75B firmware and partition table are never used.
     set(DEFAULT_ASSETS_EXTRA_FILES "${CMAKE_BINARY_DIR}/echoear-waveshare-1.32-eye-assets")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_LIST_DIR}/../scripts/prepare_echoear_eye_assets.py"
+    )
     execute_process(
         COMMAND python "${CMAKE_CURRENT_LIST_DIR}/../scripts/prepare_echoear_eye_assets.py"
                 --output-dir "${DEFAULT_ASSETS_EXTRA_FILES}"
