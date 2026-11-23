@@ -136,7 +136,7 @@ bool DlnaPlaybackManager::InitializeResampler(int source_sample_rate, int channe
         .perf_type = ESP_AE_RATE_CVT_PERF_TYPE_SPEED,
     };
     const auto ret = esp_ae_rate_cvt_open(&config, &resampler_);
-    if (resampler_ == nullptr) {
+    if (ret != ESP_AE_ERR_OK || resampler_ == nullptr) {
         ESP_LOGE(kTag, "Failed to create %d->%d Hz resampler (%d)",
                  source_sample_rate, kDlnaSampleRate, ret);
         return false;
