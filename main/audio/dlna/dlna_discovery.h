@@ -15,6 +15,8 @@ struct DlnaRenderer {
     std::string udn;
     std::string av_transport_service_type;
     std::string av_transport_control_url;
+    std::string av_transport_scpd_url;
+    bool supports_set_next_av_transport_uri = false;
 };
 
 class DlnaDiscovery {
