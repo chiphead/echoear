@@ -218,3 +218,11 @@ AVTransport SOAP escaping and response extraction now share the header-only `dln
 - When the renderer reports `NO_MEDIA_PRESENT`, playback completion is accepted only after a separate `GetMediaInfo` confirms an empty `CurrentURI`. A failed query or a still-populated URI remains ambiguous and keeps the WAV resource alive for the normal watchdog/Stop recovery path.
 - `CurrentURI` extraction explicitly permits a valid empty element for this check, while the default XML helper behavior continues to reject empty values for callers that require non-empty content.
 - This avoids premature resource retirement based on a transport state that does not, by itself, establish that the currently published item has finished. Sony SRS-X88 behavior still requires physical-device validation.
+
+
+## Bounded playback startup
+
+- After `SetAVTransportURI` + `Play` returns successfully, the worker gives the renderer up to 12 seconds to report `PLAYING`.
+- This startup deadline is independent of the WAV duration, so a long resource cannot delay recovery for most of its playback time when the renderer never starts.
+- On startup expiry, the worker issues `Stop` before retiring the current WAV. If Stop fails, the existing conservative recovery path marks the network session lost and retains published resources until HTTPD has stopped.
+- The startup deadline is a defensive default, not a measured Sony SRS-X88 startup bound. Physical-device testing may justify tuning it.
