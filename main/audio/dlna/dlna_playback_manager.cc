@@ -667,6 +667,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
     TickType_t next_poll = xTaskGetTickCount();
     TickType_t stopped_since = 0;
     TickType_t next_current_uri_poll = xTaskGetTickCount();
+    TickType_t fallback_uri_unconfirmed_since = 0;
     uint8_t unexpected_uri_mismatch_count = 0;
 
     while (!stopping_.load() && network_available_.load() &&
@@ -967,9 +968,18 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                 // overwrite a track selected by another controller.
                 std::string renderer_uri_before_fallback;
                 if (!DlnaControl::GetCurrentUri(renderer_, renderer_uri_before_fallback, 1500)) {
+                    const TickType_t now = xTaskGetTickCount();
+                    if (fallback_uri_unconfirmed_since == 0) {
+                        fallback_uri_unconfirmed_since = now;
+                    }
                     ESP_LOGW(kTag, "Deferring sequential fallback: CurrentURI could not be confirmed");
+                    if ((now - fallback_uri_unconfirmed_since) >= pdMS_TO_TICKS(10000)) {
+                        ESP_LOGE(kTag, "CurrentURI ownership remained unavailable for 10 seconds; abandoning sequential fallback without changing renderer state");
+                        break;
+                    }
                     continue;
                 }
+                fallback_uri_unconfirmed_since = 0;
                 const bool fallback_uri_is_expected =
                     renderer_uri_before_fallback == current.uri ||
                     (next.next_action_maybe_accepted &&
