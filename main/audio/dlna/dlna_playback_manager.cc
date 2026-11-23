@@ -385,12 +385,28 @@ bool DlnaPlaybackManager::QueueSegmentLocked(uint8_t index) {
     resource.utterance_generation = current_utterance_generation_;
     buffer_ready_[index] = false;
     buffer_active_[index] = false;
+    const uint32_t byte_rate = static_cast<uint32_t>(resource.wav_data[28]) |
+        (static_cast<uint32_t>(resource.wav_data[29]) << 8) |
+        (static_cast<uint32_t>(resource.wav_data[30]) << 16) |
+        (static_cast<uint32_t>(resource.wav_data[31]) << 24);
+    const uint32_t pcm_bytes = static_cast<uint32_t>(resource.wav_data[40]) |
+        (static_cast<uint32_t>(resource.wav_data[41]) << 8) |
+        (static_cast<uint32_t>(resource.wav_data[42]) << 16) |
+        (static_cast<uint32_t>(resource.wav_data[43]) << 24);
+    const uint32_t segment_duration_ms =
+        byte_rate == 0 ? 0 : static_cast<uint32_t>(
+            (static_cast<uint64_t>(pcm_bytes) * 1000) / byte_rate);
     if (xQueueSend(resource_queue_, &resource, 0) != pdTRUE) {
         heap_caps_free(resource.wav_data);
         recycle_mask_.fetch_or(1u << index);
-        ESP_LOGW(kTag, "DLNA segment queue full; dropping this segment");
+        ESP_LOGW(kTag, "DLNA segment queue full; dropping this segment (%u ms)",
+                 static_cast<unsigned>(segment_duration_ms));
         return false;
     }
+    ESP_LOGI(kTag, "Queued DLNA segment: %u ms, queue_depth=%u/%u",
+             static_cast<unsigned>(segment_duration_ms),
+             static_cast<unsigned>(uxQueueMessagesWaiting(resource_queue_)),
+             static_cast<unsigned>(kQueueDepth));
     return true;
 }
 
