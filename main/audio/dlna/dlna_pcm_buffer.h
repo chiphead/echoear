@@ -13,7 +13,7 @@
  */
 class DlnaPcmBuffer {
 public:
-    explicit DlnaPcmBuffer(size_t max_pcm_bytes = 512 * 1024);
+    explicit DlnaPcmBuffer(size_t max_pcm_bytes = 256 * 1024);
     ~DlnaPcmBuffer();
 
     DlnaPcmBuffer(const DlnaPcmBuffer&) = delete;
