@@ -155,3 +155,8 @@ This is now a capability-gated preloading implementation, but it is not yet a ve
 The worker still handles at most one look-ahead item because the registry is deliberately bounded to two resources (current + next). Additional finalized segments remain in the bounded FreeRTOS queue until a slot becomes available. If the renderer holds an HTTP request open beyond the transition, a subsequent Publish can fail when both registry slots remain occupied; that path currently drops the queued segment rather than overwriting a live resource.
 
 - If the registry is temporarily full because an older retired resource still has an active HTTP lease, the manager retains the unpublished next WAV and retries publication. It does not overwrite a live resource or drop the queued segment merely because the old HTTP request has not drained. The completed current resource remains retained until publication can proceed.
+
+## SOAP transition observation and worker watchdog
+
+- SOAP response extraction now matches XML local element names, so `CurrentURI` and `CurrentTransportState` can be read whether the renderer includes an element namespace prefix or not. Extracted text is XML-entity-decoded before URI comparison.
+- Playback now has an absolute duration watchdog (`WAV duration + 15 seconds`, capped at 180 seconds). It applies even if PLAYING was observed earlier, preventing a renderer that stops answering status queries or remains stuck in PLAYING from permanently blocking the worker. The watchdog is a recovery bound, not a claim that the renderer actually completed playback.
