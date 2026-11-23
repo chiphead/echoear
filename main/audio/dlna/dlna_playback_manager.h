@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <atomic>
 #include <mutex>
 #include <string>
 
@@ -55,6 +56,7 @@ private:
     std::string host_ipv4_;
     DlnaRenderer renderer_;
     bool renderer_ready_ = false;
+    std::atomic<bool> sink_ready_{false};
 
     DlnaMediaServer media_server_;
     uint8_t* current_wav_ = nullptr;
