@@ -54,6 +54,7 @@ private:
     bool FindSonyRenderer(DlnaRenderer& renderer);
     void ProcessResource(const Resource& resource);
     bool QueueSegmentLocked(uint8_t index);
+    void FinalizePendingUtteranceLocked();
     int FindReadyBufferLocked(uint8_t after_index) const;
     bool InitializeResampler(int source_sample_rate, int channels);
 
@@ -68,6 +69,9 @@ private:
     bool utterance_decided_ = false;
     bool fallback_utterance_ = false;
     bool discard_until_drain_ = false;
+    bool end_pending_ = false;
+    TickType_t end_pending_tick_ = 0;
+    static constexpr uint32_t kEndSilenceGraceMs = 200;
     uint32_t current_utterance_generation_ = 0;
     std::atomic<uint32_t> utterance_generation_{0};
     std::mutex buffer_mutex_;
