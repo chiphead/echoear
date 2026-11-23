@@ -51,6 +51,11 @@ Application::Application() : notify_player_(audio_service_) {
 }
 
 Application::~Application() {
+    // AudioService callbacks capture this Application and may call the DLNA
+    // manager. Stop and join its tasks while all members are still alive.
+    audio_service_.Stop();
+    AudioServiceCallbacks empty_audio_callbacks{};
+    audio_service_.SetCallbacks(empty_audio_callbacks);
     notify_player_.Stop();
     if (clock_timer_handle_ != nullptr) {
         esp_timer_stop(clock_timer_handle_);
