@@ -55,7 +55,8 @@ bool DlnaPcmBuffer::Initialize() {
 
 bool DlnaPcmBuffer::Begin(int sample_rate, int channels) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (pcm_data_ == nullptr || sample_rate <= 0 || channels < 1 || channels > 2) {
+    if (pcm_data_ == nullptr || sample_rate <= 0 || sample_rate > 192000 ||
+        channels < 1 || channels > 2) {
         return false;
     }
     pcm_size_ = 0;
