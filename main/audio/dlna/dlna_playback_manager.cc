@@ -975,11 +975,21 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             no_media_uri_confirmed_empty && elapsed_ms >= 1500;
         const bool stopped_after_play =
             (renderer_stopped && current.observed_playing) || no_media_terminal;
+        constexpr uint32_t kNextTransitionGraceMs = 10000;
+        constexpr uint32_t kNextStoppedGraceMs = 2500;
+        const TickType_t next_action_age =
+            xTaskGetTickCount() - next.next_action_maybe_accepted_at;
+        const bool next_renderer_stopped =
+            state_ok && transport == DlnaTransportState::kStopped;
         const bool next_transition_pending = have_next && next.published &&
             next.next_action_maybe_accepted &&
-            (next.next_uri_observed ||
-             (state_ok && transport == DlnaTransportState::kTransitioning)) &&
-            (xTaskGetTickCount() - next.next_action_maybe_accepted_at) < pdMS_TO_TICKS(10000);
+            ((state_ok && transport == DlnaTransportState::kTransitioning &&
+              next_action_age < pdMS_TO_TICKS(kNextTransitionGraceMs)) ||
+             (next.next_uri_observed && next_renderer_stopped &&
+              next_action_age < pdMS_TO_TICKS(kNextStoppedGraceMs)) ||
+             (next.next_uri_observed && !next_renderer_stopped &&
+              (!state_ok || transport != DlnaTransportState::kTransitioning) &&
+              next_action_age < pdMS_TO_TICKS(kNextTransitionGraceMs)));
         if ((duration_expired || startup_expired) && !next_transition_pending &&
             (!renderer_stopped || startup_expired)) {
             if (startup_expired) {
@@ -1049,15 +1059,34 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                     const TickType_t now = xTaskGetTickCount();
                     const bool renderer_reports_transition =
                         state_ok && transport == DlnaTransportState::kTransitioning;
+                    const TickType_t next_action_age =
+                        now - next.next_action_maybe_accepted_at;
+                    const bool next_uri_still_starting =
+                        next.next_uri_observed &&
+                        (!state_ok || transport != DlnaTransportState::kStopped) &&
+                        next_action_age < pdMS_TO_TICKS(10000);
+                    const bool next_uri_stuck_stopped =
+                        next.next_uri_observed && state_ok &&
+                        transport == DlnaTransportState::kStopped &&
+                        next_action_age < pdMS_TO_TICKS(2500);
                     const bool next_transition_in_progress =
-                        renderer_reports_transition || next.next_uri_observed;
-                    if (next_transition_in_progress &&
-                        (now - next.next_action_maybe_accepted_at) < pdMS_TO_TICKS(10000)) {
-                        // Some renderers update CurrentURI before reporting
-                        // PLAYING, or expose a TRANSITIONING/STOPPED interval.
-                        // Do not overwrite that accepted next item with a
-                        // second SetAVTransportURI while it is starting.
+                        renderer_reports_transition || next_uri_still_starting ||
+                        next_uri_stuck_stopped;
+                    if (next_transition_in_progress) {
+                        // Keep the longer grace only while the renderer is
+                        // explicitly TRANSITIONING (or its state is unavailable).
+                        // Once it has selected the preloaded URI but remains
+                        // STOPPED, bound the wait: X88 can fetch the next WAV
+                        // without automatically starting it. Sequential
+                        // SetAVTransportURI + Play is then the recovery path.
                         continue;
+                    }
+                    if (next.next_uri_observed && state_ok &&
+                        transport == DlnaTransportState::kStopped &&
+                        next_action_age >= pdMS_TO_TICKS(2500)) {
+                        ESP_LOGW(kTag,
+                                 "Preloaded URI remained STOPPED for %u ms; switching to sequential fallback",
+                                 static_cast<unsigned>(next_action_age * portTICK_PERIOD_MS));
                     }
                     if (stopped_since == 0) stopped_since = now;
                     if ((now - stopped_since) < pdMS_TO_TICKS(2000)) {
