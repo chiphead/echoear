@@ -200,3 +200,11 @@ AVTransport SOAP escaping and response extraction now share the header-only `dln
 - Media responses are emitted in bounded 4 KiB writes with a 5-second overall response deadline. A timed-out or disconnected client causes the handler to return failure, allowing HTTPD to close that session and the registry lease guard to release its reference.
 - HTTP telemetry records the actual WAV body bytes accepted by httpd_send(), including partial transfers that later time out. HEAD responses correctly report zero body bytes.
 - This is a defensive bound, not evidence of the X88's actual request cadence or throughput. A full ESP-IDF build and physical slow-client/X88 test remain outstanding.
+
+
+## Ambiguous AVTransport start failures
+
+- `SetUriAndPlay()` performs `SetAVTransportURI` followed by `Play`; a false result does not prove that the renderer rejected the URI, because the URI step may have succeeded while the Play response timed out.
+- On initial or sequential-fallback start failure, the worker now issues `Stop` before retiring either published resource. A successful Stop permits normal retirement while any active HTTP lease drains.
+- If recovery Stop also fails, the worker marks the network session lost and leaves published resources registered. The outer worker path first stops HTTPD, then retires the registry, preventing a late renderer GET from racing with premature WAV release.
+- This is a conservative recovery path; actual Sony X88 behavior after SOAP timeouts still requires device testing.
