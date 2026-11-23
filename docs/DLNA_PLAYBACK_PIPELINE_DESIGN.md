@@ -278,3 +278,16 @@ AVTransport SOAP escaping and response extraction now share the header-only `dln
 - AudioService calls Stop() from its destructor as a final safety net. Application::~Application() also stops AudioService explicitly while the DLNA manager and other callback targets are still alive, then clears the callbacks before member destruction. This matters because the application's PCM and playback callbacks capture this and can call DlnaPlaybackManager.
 - The stop wait is intentionally a join: if a codec driver or an in-flight output callback does not return, destruction waits rather than freeing memory underneath the task. This is safer than a timeout followed by use-after-free, but a permanently blocked hardware operation can consequently delay shutdown.
 - This change is based on static lifecycle analysis. It still requires compilation against the project's ESP-IDF 6.1 environment and a runtime stop/restart exercise.
+
+
+## End-to-end latency telemetry
+
+The playback manager emits monotonic timing checkpoints without logging PCM payloads or adding waits to the audio callback:
+
+- `Timing segment finalized`: elapsed time from the first accepted PCM frame of the utterance to WAV finalization, plus encoded duration and byte size.
+- `Dequeued DLNA segment`: time spent waiting in the bounded resource queue after WAV finalization.
+- `Timing SetUriAndPlay`: duration of the combined `SetAVTransportURI` + `Play` control sequence, and elapsed time from the first accepted PCM frame to the successful control response.
+- `Timing renderer PLAYING observed`: elapsed time from first accepted PCM to the first confirmed PLAYING state, plus time from the control response to that observation.
+- `Renderer transitioned to preloaded item; timing`: elapsed time from the first PCM frame to a confirmed transition to a preloaded next item.
+
+These are renderer-observation timestamps, not acoustic measurements: the last checkpoint can lag the actual speaker output because AVTransport polling is periodic and the renderer may buffer audio after entering PLAYING. Compare the checkpoints across several utterances before changing PCM pacing, WAV segmentation, or SOAP polling cadence. The telemetry intentionally does not add diagnostic delays or change the 32 kHz PCM format.
