@@ -16,9 +16,9 @@ This feature branch adds a staged DLNA output path for the Waveshare ESP32-S3-To
 2. **Renderer description** — implemented in `main/audio/dlna/dlna_device_description.*`. Fetch LOCATION over HTTP, extract FriendlyName/Manufacturer/ModelName/UDN, and resolve the AVTransport service type and control URL using UPnP `URLBase` when present. The response is bounded to 24 KiB.
 3. **Media HTTP endpoint** — `DlnaMediaServer` now serves one immutable WAV buffer over HTTP, supports GET, HEAD, and single-byte-range requests, and returns `audio/wav`. HEAD responses advertise the selected representation length without sending the WAV body. The caller must keep the buffer alive and unchanged until the server stops.
 4. **AVTransport control** — `DlnaControl` sends `SetAVTransportURI`, `Play`, and `Stop` SOAP actions with bounded response capture and XML-escaped DIDL-Lite metadata. Calls are blocking and must run in a worker task; renderer state/event subscription remains pending.
-5. **PCM output abstraction** — an optional `AudioServiceCallbacks::on_pcm_output` hook is now present after Opus decode. It receives PCM plus the output sample rate; returning `true` means the frame was handled, while `false` preserves the existing ES8311/local codec path. The callback contract explicitly forbids blocking/network I/O and is intended only to enqueue/copy PCM. No DLNA callback is registered yet.
-6. **Utterance buffering and publication** — `DlnaPcmBuffer` now provides a bounded, mutex-protected PCM accumulator and WAV finalizer. It validates a consistent sample rate/channel count, caps memory (default 512 KiB), prefers PSRAM, and returns an immutable WAV allocation for the media server. The lifecycle owner still needs to call `Begin`, append frames from the PCM callback, and call `FinalizeWav` from a worker after playback drains. The WAV header is reserved at the front of the allocation, so finalization writes the header and transfers buffer ownership without copying the utterance or allocating a second full-size block. Only after the buffer is immutable and the HTTP endpoint is ready should a worker issue `SetAVTransportURI` and `Play`. This deliberately favors protocol compatibility and bounded complexity over low-latency streaming; true live streaming can be evaluated later against renderer behavior.
-7. **TTS lifecycle and UX** — handle interruption, playback completion, Wi-Fi loss, buffer limits/PSRAM exhaustion, output selection, and microphone/AEC policy. Keep the microphone capture and ES8311 input path independent from the selected speaker output.
+5. **PCM output abstraction** — implemented. The optional `AudioServiceCallbacks::on_pcm_output` hook runs after Opus decode and receives PCM plus the output sample rate. Returning `true` means the frame was handled; `false` preserves the existing ES8311/local codec path. The callback must not perform network I/O.
+6. **Utterance buffering and publication** — implemented. `DlnaPcmBuffer` provides a bounded, mutex-protected PCM accumulator and WAV finalizer. It accepts PCM16 mono/stereo up to 192 kHz, caps memory at 512 KiB per accumulator, prefers PSRAM, and transfers an immutable WAV allocation to the media server without copying the utterance. `DlnaPlaybackManager` owns two accumulators, queues completed resources, and performs discovery, HTTP publication, and SOAP control on a worker. Queue saturation has an independent buffer-recycle path.
+7. **Playback lifecycle and routing** — integrated for all decoded playback audio, including server speech, `PlaySound()` assets, and notification audio. Each utterance keeps one output choice: local output if the sink is unavailable at its first frame, or DLNA buffering otherwise. Wi-Fi loss triggers worker cleanup and reconnect triggers rediscovery. The microphone capture and ES8311 input path remain independent from speaker output. Renderer playback-completion tracking and interruption-safe replacement are still follow-up work.
 
 ## Integrated audio-output path
 
@@ -50,7 +50,7 @@ if (media.Start(board_ipv4, wav_data, wav_size)) {
 }
 ```
 
-The `wav_data` buffer must remain valid and unchanged until `media.Stop()` returns. The example assumes the renderer has already been discovered and its device description parsed. It is a transport smoke-test path, not yet wired to TTS playback.
+The `wav_data` buffer must remain valid and unchanged until `media.Stop()` returns. The example assumes the renderer has already been discovered and its device description parsed. It remains a standalone transport diagnostic; the integrated AudioService path is implemented separately.
 
 ## Optional Sony SRS-X88 smoke test
 
@@ -70,7 +70,7 @@ task and does not intercept TTS PCM or alter the local ES8311 audio path.
 
 ## Current limitations
 
-- SSDP discovery, UPnP device-description parsing, and a first AVTransport SOAP control client are implemented. SOAP control is not yet validated against a physical renderer; the audio sink routing remains unimplemented. The HTTP endpoint is implemented but not yet tested against the SRS-X88.
+- SSDP discovery, UPnP device-description parsing, AVTransport SOAP control, the WAV HTTP endpoint, and the integrated PCM routing path are implemented. SOAP control and media delivery are not yet validated against a physical SRS-X88.
 - The DLNA modules, integrated playback manager, and optional smoke-test worker have not yet been confirmed compiled with the project's ESP-IDF 6.1.x environment or validated on hardware.
 - The integrated manager routes all decoded playback sounds when enabled, while retaining local-output fallback when the renderer is not ready at the start of an utterance. ESP-IDF 6.1.x compilation and physical SRS-X88 playback validation are still pending.
 - The Sony SRS-X88 must be on the same LAN/VLAN and have network standby / network control enabled as applicable.
