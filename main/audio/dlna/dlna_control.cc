@@ -191,6 +191,22 @@ bool ExtractXmlValue(const std::string& xml, const char* tag, std::string& value
 }
 }  // namespace
 
+bool DlnaControl::GetCurrentUri(const DlnaRenderer& renderer,
+                                std::string& uri,
+                                uint32_t timeout_ms) {
+    std::string response;
+    if (!Invoke(renderer, "GetMediaInfo",
+                "<InstanceID>0</InstanceID>", timeout_ms, &response)) {
+        uri.clear();
+        return false;
+    }
+    if (!ExtractXmlValue(response, "CurrentURI", uri)) {
+        uri.clear();
+        return false;
+    }
+    return true;
+}
+
 bool DlnaControl::GetTransportState(const DlnaRenderer& renderer,
                                     DlnaTransportState& state,
                                     uint32_t timeout_ms) {
