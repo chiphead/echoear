@@ -109,3 +109,14 @@ The existing implementation has SCPD capability detection but still uses a singl
 - The new source is included only in the Waveshare 1.32 DLNA board build.
 
 This is the first isolated implementation step. The registry is not yet connected to `DlnaMediaServer` or `DlnaPlaybackManager`; the existing single-resource playback behavior remains unchanged. The server integration must ensure its HTTPD task has stopped and all handler leases have been released before the registry is destroyed.
+
+## Multi-resource HTTP server implementation progress
+
+- Added a registry-backed `DlnaMediaServer::Start(host, registry, port)` overload.
+- The registry-backed server uses ESP-IDF HTTPD wildcard matching for `/dlna/*`, allowing generation/sequence-specific resource URLs while keeping one HTTP server alive.
+- GET, HEAD, and single byte-range responses use the same immutable resource view.
+- Each request acquires a unique registry lease and releases it through a scope guard on every return path.
+- Unknown or retired paths return 404. Legacy single-WAV `Start(host, data, size)` remains available for the existing playback manager.
+- Registered WAV sizes are bounded to the signed response length accepted by the HTTP server API.
+
+The playback manager has not yet been switched to this overload. The current live playback path still starts/stops the legacy one-resource server per segment. The registry-backed overload is an isolated integration point; it does not yet provide concurrent preloading or gapless playback.
