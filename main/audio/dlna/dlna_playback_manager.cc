@@ -746,10 +746,11 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
 
         if (have_next && next.published && !next.next_action_attempted &&
             renderer_.supports_set_next_av_transport_uri) {
-            // SetNextAVTransportURI changes the renderer's future playback
-            // target. Reconfirm that our item still owns AVTransport directly
-            // before issuing it; the periodic observer may be up to 3 seconds
-            // old and another controller could have taken over in that gap.
+            // Issue SetNext as soon as the look-ahead WAV is published.
+            // Waiting for a PLAYING poll is too late for short (1 s) segments,
+            // especially because the ownership check itself adds a SOAP round
+            // trip. Confirm the active URI immediately before the action so an
+            // external controller is never overwritten.
             std::string active_uri;
             if (!DlnaControl::GetCurrentUri(renderer_, active_uri, 1500)) {
                 ESP_LOGW(kTag, "Deferring SetNext: could not confirm active CurrentURI");
