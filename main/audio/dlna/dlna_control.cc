@@ -178,16 +178,52 @@ bool DlnaControl::Stop(const DlnaRenderer& renderer, uint32_t timeout_ms) {
 }
 
 namespace {
+std::string XmlUnescape(std::string value) {
+    const std::pair<const char*, const char*> entities[] = {
+        {"&quot;", "\\""}, {"&apos;", "'"}, {"&lt;", "<"},
+        {"&gt;", ">"}, {"&amp;", "&"},
+    };
+    for (const auto& entity : entities) {
+        size_t pos = 0;
+        while ((pos = value.find(entity.first, pos)) != std::string::npos) {
+            value.replace(pos, std::char_traits<char>::length(entity.first),
+                          entity.second);
+            pos += std::char_traits<char>::length(entity.second);
+        }
+    }
+    return value;
+}
+
 bool ExtractXmlValue(const std::string& xml, const char* tag, std::string& value) {
-    const std::string open = std::string("<") + tag + ">";
-    const std::string close = std::string("</") + tag + ">";
-    const size_t begin = xml.find(open);
-    if (begin == std::string::npos) return false;
-    const size_t value_begin = begin + open.size();
-    const size_t end = xml.find(close, value_begin);
-    if (end == std::string::npos) return false;
-    value = xml.substr(value_begin, end - value_begin);
-    return !value.empty();
+    if (tag == nullptr || *tag == '\\0') return false;
+    const std::string wanted(tag);
+    size_t pos = 0;
+    while ((pos = xml.find('<', pos)) != std::string::npos) {
+        const size_t name_begin = pos + 1;
+        if (name_begin >= xml.size() || xml[name_begin] == '/' ||
+            xml[name_begin] == '!' || xml[name_begin] == '?') {
+            ++pos;
+            continue;
+        }
+        const size_t name_end = xml.find_first_of(" />\\t\\r\\n", name_begin);
+        if (name_end == std::string::npos) return false;
+        const std::string qualified = xml.substr(name_begin, name_end - name_begin);
+        const size_t colon = qualified.rfind(':');
+        const std::string local = colon == std::string::npos
+            ? qualified : qualified.substr(colon + 1);
+        if (local != wanted) {
+            pos = name_end;
+            continue;
+        }
+        const size_t open_end = xml.find('>', name_end);
+        if (open_end == std::string::npos) return false;
+        const std::string close = "</" + qualified + ">";
+        const size_t close_pos = xml.find(close, open_end + 1);
+        if (close_pos == std::string::npos) return false;
+        value = XmlUnescape(xml.substr(open_end + 1, close_pos - open_end - 1));
+        return !value.empty();
+    }
+    return false;
 }
 }  // namespace
 
