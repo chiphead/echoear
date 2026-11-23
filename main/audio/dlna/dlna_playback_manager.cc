@@ -200,7 +200,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         uint32_t max_output_frames = 0;
         const uint32_t input_frames = static_cast<uint32_t>(sample_count / channels);
         if (esp_ae_rate_cvt_get_max_out_sample_num(resampler_, input_frames,
-                                                   &max_output_frames) != ESP_OK ||
+                                                   &max_output_frames) != ESP_AE_ERR_OK ||
             static_cast<size_t>(max_output_frames) * channels > resampled_pcm_.size()) {
             fallback_utterance_ = true;
             ESP_LOGW(kTag, "PCM resampler output exceeds prepared frame capacity");
