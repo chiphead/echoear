@@ -119,7 +119,7 @@ bool DlnaPcmBuffer::FinalizeWav(uint8_t** wav_data, size_t* wav_size) {
     *wav_size = kWavHeaderSize + pcm_size_;
     pcm_data_ = nullptr;  // Ownership transfers to the caller (heap_caps_free).
     active_ = false;
-        return true;
+    return true;
 }
 
 void DlnaPcmBuffer::Reset() {
