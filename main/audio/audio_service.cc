@@ -381,8 +381,14 @@ void AudioService::AudioOutputTask() {
                      denominator - 1) / denominator);
                 TickType_t frame_ticks = pdMS_TO_TICKS(frame_duration_ms);
                 if (frame_ticks == 0) frame_ticks = 1;
-                if (!dlna_pacing_active) {
-                    next_dlna_output_tick = xTaskGetTickCount();
+                const TickType_t now = xTaskGetTickCount();
+                const int32_t lateness_ticks =
+                    static_cast<int32_t>(now - next_dlna_output_tick);
+                if (!dlna_pacing_active ||
+                    lateness_ticks > static_cast<int32_t>(frame_ticks * 2)) {
+                    // After a long source/network stall, restart the pacing
+                    // epoch instead of rapidly "catching up" old deadlines.
+                    next_dlna_output_tick = now;
                     dlna_pacing_active = true;
                 }
                 vTaskDelayUntil(&next_dlna_output_tick, frame_ticks);
