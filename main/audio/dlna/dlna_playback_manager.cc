@@ -162,10 +162,24 @@ bool DlnaPlaybackManager::InitializeResampler(int source_sample_rate, int channe
 }
 
 void DlnaPlaybackManager::NotifyNetworkDisconnected() {
-    // Invalidate queued and active resources immediately. Any PCM frames still
-    // draining from AudioService are consumed and discarded, not sent locally
-    // halfway through an utterance.
-    AbortUtterance();
+    // Invalidate queued and active resources immediately. Only keep the
+    // discard-until-drain guard when a DLNA-routed utterance was actually in
+    // progress. Unlike AudioService's abort callback, a network event does not
+    // guarantee that a later playback-drained callback will arrive.
+    utterance_generation_.fetch_add(1);
+    {
+        std::lock_guard<std::mutex> lock(buffer_mutex_);
+        const bool dlna_utterance_in_progress =
+            utterance_decided_ && !fallback_utterance_;
+        discard_until_drain_ = discard_until_drain_ || dlna_utterance_in_progress;
+        const uint8_t index = write_buffer_index_;
+        buffers_[index].Reset();
+        buffer_active_[index] = false;
+        buffer_dropping_[index] = false;
+        fallback_utterance_ = false;
+        utterance_decided_ = false;
+        if (resampler_ != nullptr) esp_ae_rate_cvt_reset(resampler_);
+    }
     network_available_.store(false);
     sink_ready_.store(false);
     network_lost_.store(true);
