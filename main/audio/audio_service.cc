@@ -133,11 +133,17 @@ void AudioService::Start() {
                                            AS_EVENT_AUDIO_PROCESSOR_RUNNING |
                                            AS_EVENT_AUDIO_INPUT_STOP_REQUEST);
 
-    esp_timer_start_periodic(audio_power_timer_, 1000000);
+    if (audio_power_timer_ != nullptr) esp_timer_start_periodic(audio_power_timer_, 1000000);
+    auto handle_task_creation = [this](BaseType_t result, const char* task_name) {
+        if (result == pdPASS) return true;
+        ESP_LOGE(TAG, "Failed to create %s task", task_name);
+        Stop();
+        return false;
+    };
 
 #if CONFIG_USE_AUDIO_PROCESSOR
     /* Start the audio input task */
-    xTaskCreatePinnedToCore(
+    const BaseType_t input_result = xTaskCreatePinnedToCore(
         [](void* arg) {
             AudioService* audio_service = (AudioService*)arg;
             audio_service->AudioInputTask();
@@ -145,9 +151,10 @@ void AudioService::Start() {
             vTaskDelete(NULL);
         },
         "audio_input", 2048 * 3, this, 8, &audio_input_task_handle_, 0);
+    if (!handle_task_creation(input_result, "audio_input")) return;
 
     /* Start the audio output task */
-    xTaskCreate(
+    const BaseType_t output_result = xTaskCreate(
         [](void* arg) {
             AudioService* audio_service = (AudioService*)arg;
             audio_service->AudioOutputTask();
@@ -155,9 +162,10 @@ void AudioService::Start() {
             vTaskDelete(NULL);
         },
         "audio_output", 2048 * 2, this, 4, &audio_output_task_handle_);
+    if (!handle_task_creation(output_result, "audio_output")) return;
 #else
     /* Start the audio input task */
-    xTaskCreate(
+    const BaseType_t input_result = xTaskCreate(
         [](void* arg) {
             AudioService* audio_service = (AudioService*)arg;
             audio_service->AudioInputTask();
@@ -165,9 +173,10 @@ void AudioService::Start() {
             vTaskDelete(NULL);
         },
         "audio_input", 2048 * 2, this, 8, &audio_input_task_handle_);
+    if (!handle_task_creation(input_result, "audio_input")) return;
 
     /* Start the audio output task */
-    xTaskCreate(
+    const BaseType_t output_result = xTaskCreate(
         [](void* arg) {
             AudioService* audio_service = (AudioService*)arg;
             audio_service->AudioOutputTask();
@@ -175,10 +184,11 @@ void AudioService::Start() {
             vTaskDelete(NULL);
         },
         "audio_output", 2048, this, 4, &audio_output_task_handle_);
+    if (!handle_task_creation(output_result, "audio_output")) return;
 #endif
 
     /* Start the opus codec task */
-    xTaskCreate(
+    const BaseType_t codec_result = xTaskCreate(
         [](void* arg) {
             AudioService* audio_service = (AudioService*)arg;
             audio_service->OpusCodecTask();
@@ -186,6 +196,7 @@ void AudioService::Start() {
             vTaskDelete(NULL);
         },
         "opus_codec", 2048 * 12, this, 2, &opus_codec_task_handle_);
+    if (!handle_task_creation(codec_result, "opus_codec")) return;
 }
 
 void AudioService::Stop() {
