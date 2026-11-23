@@ -346,6 +346,7 @@ bool DlnaPlaybackManager::QueueSegmentLocked(uint8_t index) {
 void DlnaPlaybackManager::EndUtterance() {
     {
         std::lock_guard<std::mutex> lock(buffer_mutex_);
+        if (resampler_ != nullptr) esp_ae_rate_cvt_reset(resampler_);
         const uint8_t index = write_buffer_index_;
         if (discard_until_drain_) {
             buffers_[index].Reset();
@@ -385,6 +386,7 @@ void DlnaPlaybackManager::EndUtterance() {
 void DlnaPlaybackManager::AbortUtterance() {
     utterance_generation_.fetch_add(1);
     std::lock_guard<std::mutex> lock(buffer_mutex_);
+    if (resampler_ != nullptr) esp_ae_rate_cvt_reset(resampler_);
     // A frame may already be in AudioOutputTask but not yet have reached the
     // PCM callback. Consume/discard frames until AudioService reports drain.
     discard_until_drain_ = true;
