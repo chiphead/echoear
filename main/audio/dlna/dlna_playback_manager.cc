@@ -669,6 +669,12 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             elapsed_ms >= std::min<uint32_t>(current.duration_ms + 5000, 120000);
         const bool stopped_after_play = state_ok &&
             transport == DlnaTransportState::kStopped && current.observed_playing;
+        if ((stopped_after_play || duration_expired) && have_next && !next.published) {
+            // The previous retired resource may still have an HTTP lease. Keep
+            // the completed current item retained and retry Publish until that
+            // lease drains; never discard the queued next WAV or reuse live bytes.
+            continue;
+        }
         if (stopped_after_play || duration_expired) {
             if (have_next && next.published) {
                 // A successful SetNext may have transitioned while the
