@@ -161,6 +161,7 @@ void AudioService::Start() {
         [](void* arg) {
             AudioService* audio_service = (AudioService*)arg;
             audio_service->AudioInputTask();
+            xEventGroupSetBits(audio_service->event_group_, AS_EVENT_INPUT_TASK_EXITED);
             vTaskDelete(NULL);
         },
         "audio_input", 2048 * 2, this, 8, &audio_input_task_handle_);
@@ -170,6 +171,7 @@ void AudioService::Start() {
         [](void* arg) {
             AudioService* audio_service = (AudioService*)arg;
             audio_service->AudioOutputTask();
+            xEventGroupSetBits(audio_service->event_group_, AS_EVENT_OUTPUT_TASK_EXITED);
             vTaskDelete(NULL);
         },
         "audio_output", 2048, this, 4, &audio_output_task_handle_);
@@ -187,10 +189,13 @@ void AudioService::Start() {
 }
 
 void AudioService::Stop() {
-    esp_timer_stop(audio_power_timer_);
     service_stopped_.store(true);
-    xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING | AS_EVENT_WAKE_WORD_RUNNING |
-                                         AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+    if (audio_power_timer_ != nullptr) esp_timer_stop(audio_power_timer_);
+    if (event_group_ != nullptr) {
+        xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING |
+                                             AS_EVENT_WAKE_WORD_RUNNING |
+                                             AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+    }
 
     bool playback_aborted = false;
     bool notify_drained = false;
@@ -219,7 +224,7 @@ void AudioService::Stop() {
     if (audio_input_task_handle_ != nullptr) exit_mask |= AS_EVENT_INPUT_TASK_EXITED;
     if (audio_output_task_handle_ != nullptr) exit_mask |= AS_EVENT_OUTPUT_TASK_EXITED;
     if (opus_codec_task_handle_ != nullptr) exit_mask |= AS_EVENT_CODEC_TASK_EXITED;
-    if (exit_mask != 0) {
+    if (exit_mask != 0 && event_group_ != nullptr) {
         xEventGroupWaitBits(event_group_, exit_mask, pdFALSE, pdTRUE, portMAX_DELAY);
     }
     audio_input_task_handle_ = nullptr;
