@@ -804,17 +804,38 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
 
         if (have_next && next.published && current.observed_playing && !next.next_action_attempted &&
             renderer_.supports_set_next_av_transport_uri) {
-            next.next_action_attempted = true;
-            const bool next_action_response_ok = DlnaControl::SetNextUri(
-                renderer_, next.uri, "EchoEar audio", kControlTimeoutMs);
-            // A timeout/error response is ambiguous: the renderer may have
-            // accepted SetNextAVTransportURI before the SOAP response was lost.
-            // Observe CurrentURI in either case before deciding to overwrite it.
-            next.next_action_maybe_accepted = true;
-            next.next_action_maybe_accepted_at = xTaskGetTickCount();
-            if (!next_action_response_ok) {
+            // SetNextAVTransportURI changes the renderer's future playback
+            // target. Reconfirm that our item still owns AVTransport directly
+            // before issuing it; the periodic observer may be up to 3 seconds
+            // old and another controller could have taken over in that gap.
+            std::string active_uri;
+            if (!DlnaControl::GetCurrentUri(renderer_, active_uri, 1500)) {
+                ESP_LOGW(kTag, "Deferring SetNext: could not confirm active CurrentURI");
+            } else if (active_uri != current.uri) {
+                if (unexpected_uri_mismatch_count < 2) {
+                    ++unexpected_uri_mismatch_count;
+                }
                 ESP_LOGW(kTag,
-                         "SetNext response failed; checking renderer URI before sequential fallback");
+                         "Deferring SetNext because CurrentURI no longer matches active item (%u/2 confirmations)",
+                         static_cast<unsigned>(unexpected_uri_mismatch_count));
+                if (unexpected_uri_mismatch_count >= 2) {
+                    ESP_LOGW(kTag, "Renderer was externally taken over before SetNext; leaving its playback untouched");
+                    break;
+                }
+            } else {
+                unexpected_uri_mismatch_count = 0;
+                next.next_action_attempted = true;
+                const bool next_action_response_ok = DlnaControl::SetNextUri(
+                    renderer_, next.uri, "EchoEar audio", kControlTimeoutMs);
+                // A timeout/error response is ambiguous: the renderer may have
+                // accepted SetNextAVTransportURI before the SOAP response was lost.
+                // Observe CurrentURI in either case before deciding to overwrite it.
+                next.next_action_maybe_accepted = true;
+                next.next_action_maybe_accepted_at = xTaskGetTickCount();
+                if (!next_action_response_ok) {
+                    ESP_LOGW(kTag,
+                             "SetNext response failed; checking renderer URI before sequential fallback");
+                }
             }
         }
 
@@ -940,6 +961,33 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                         continue;
                     }
                 }
+                // Sequential fallback also replaces the renderer's current
+                // URI. Confirm that AVTransport still references an item owned
+                // by this worker before sending SetAVTransportURI; never
+                // overwrite a track selected by another controller.
+                std::string renderer_uri_before_fallback;
+                if (!DlnaControl::GetCurrentUri(renderer_, renderer_uri_before_fallback, 1500)) {
+                    ESP_LOGW(kTag, "Deferring sequential fallback: CurrentURI could not be confirmed");
+                    continue;
+                }
+                const bool fallback_uri_is_expected =
+                    renderer_uri_before_fallback == current.uri ||
+                    (next.next_action_maybe_accepted &&
+                     renderer_uri_before_fallback == next.uri);
+                if (!fallback_uri_is_expected) {
+                    if (unexpected_uri_mismatch_count < 2) {
+                        ++unexpected_uri_mismatch_count;
+                    }
+                    ESP_LOGW(kTag,
+                             "Deferring sequential fallback because renderer URI is externally owned (%u/2 confirmations)",
+                             static_cast<unsigned>(unexpected_uri_mismatch_count));
+                    if (unexpected_uri_mismatch_count >= 2) {
+                        ESP_LOGW(kTag, "External AVTransport owner confirmed; abandoning queued EchoEar item without Stop");
+                        break;
+                    }
+                    continue;
+                }
+                unexpected_uri_mismatch_count = 0;
                 if (DlnaControl::SetUriAndPlay(renderer_, next.uri,
                                                "EchoEar audio", kControlTimeoutMs)) {
                     resource_registry_.Retire(current.path);
