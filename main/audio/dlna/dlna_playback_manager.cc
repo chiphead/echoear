@@ -671,14 +671,27 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         const uint32_t playback_watchdog_ms = std::min<uint32_t>(
             current.duration_ms + 15000, 180000);
         const bool duration_expired = elapsed_ms >= playback_watchdog_ms;
-        const bool stopped_after_play = state_ok &&
-            transport == DlnaTransportState::kStopped && current.observed_playing;
+        const bool renderer_stopped = state_ok &&
+            transport == DlnaTransportState::kStopped;
+        const bool stopped_after_play = renderer_stopped && current.observed_playing;
         if ((stopped_after_play || duration_expired) && have_next && !next.published) {
             // The previous retired resource may still have an HTTP lease. Keep
             // the completed current item retained and retry Publish until that
             // lease drains; never discard the queued next WAV or reuse live bytes.
             continue;
         }
+        if (duration_expired && !renderer_stopped && !have_next) {
+            ESP_LOGW(kTag, "Playback watchdog expired without a confirmed STOPPED state; stopping renderer");
+            if (!DlnaControl::Stop(renderer_, kControlTimeoutMs)) {
+                renderer_ready_ = false;
+                sink_ready_.store(false);
+                media_server_.Stop();
+                resource_registry_.RetireAll();
+                ESP_LOGE(kTag, "Renderer Stop failed; media server retired to protect WAV ownership");
+                return;
+            }
+        }
+
         if (stopped_after_play || duration_expired) {
             if (have_next && next.published) {
                 // A successful SetNext may have transitioned while the
