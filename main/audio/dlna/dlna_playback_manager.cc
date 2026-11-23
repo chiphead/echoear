@@ -665,8 +665,12 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
 
         const uint32_t elapsed_ms = static_cast<uint32_t>(
             (xTaskGetTickCount() - current.started) * portTICK_PERIOD_MS);
-        const bool duration_expired = !current.observed_playing &&
-            elapsed_ms >= std::min<uint32_t>(current.duration_ms + 5000, 120000);
+        // Never let a lost/stale AVTransport status query pin the worker
+        // forever. Allow a generous tail after the encoded WAV duration, but
+        // apply this watchdog whether or not PLAYING was ever observed.
+        const uint32_t playback_watchdog_ms = std::min<uint32_t>(
+            current.duration_ms + 15000, 180000);
+        const bool duration_expired = elapsed_ms >= playback_watchdog_ms;
         const bool stopped_after_play = state_ok &&
             transport == DlnaTransportState::kStopped && current.observed_playing;
         if ((stopped_after_play || duration_expired) && have_next && !next.published) {
