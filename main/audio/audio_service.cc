@@ -664,10 +664,11 @@ bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> pa
             });
         } else {
             const uint32_t dropped_total = ++debug_statistics_.decode_drop_count;
-            lock.unlock();
             const int64_t now = esp_timer_get_time();
-            if (now - last_decode_drop_log_time_ >= 1000000) {
-                last_decode_drop_log_time_ = now;
+            const bool should_log = now - last_decode_drop_log_time_ >= 1000000;
+            if (should_log) last_decode_drop_log_time_ = now;
+            lock.unlock();
+            if (should_log) {
                 ESP_LOGW(TAG, "Decode queue is full, dropping incoming audio packet (dropped %lu so far)",
                          static_cast<unsigned long>(dropped_total));
             }
