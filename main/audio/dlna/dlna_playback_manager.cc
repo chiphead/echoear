@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <new>
 #include <utility>
 
@@ -483,136 +484,205 @@ bool DlnaPlaybackManager::FindSonyRenderer(DlnaRenderer& renderer) {
 }
 
 
-void DlnaPlaybackManager::WaitForPlaybackCompletion(size_t wav_size,
-                                                     uint32_t utterance_generation) {
-    // Canonical PCM WAV fields: byte rate at offset 28, data size at offset 40.
-    // The buffer is still owned by current_wav_ while this method runs.
-    uint32_t byte_rate = 0;
-    uint32_t data_size = 0;
-    if (wav_size >= 44) {
-        const uint8_t* wav = current_wav_;
-        byte_rate = static_cast<uint32_t>(wav[28]) |
-                    (static_cast<uint32_t>(wav[29]) << 8) |
-                    (static_cast<uint32_t>(wav[30]) << 16) |
-                    (static_cast<uint32_t>(wav[31]) << 24);
-        data_size = static_cast<uint32_t>(wav[40]) |
-                    (static_cast<uint32_t>(wav[41]) << 8) |
-                    (static_cast<uint32_t>(wav[42]) << 16) |
-                    (static_cast<uint32_t>(wav[43]) << 24);
-    }
-    const uint32_t duration_ms = byte_rate == 0 ? 0 :
-        static_cast<uint32_t>((static_cast<uint64_t>(data_size) * 1000) / byte_rate);
-    const uint32_t fallback_wait_ms = std::min<uint32_t>(duration_ms + 5000, 120000);
-    const TickType_t started = xTaskGetTickCount();
-    bool observed_playing = false;
-    bool transport_query_succeeded = false;
+void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
+    struct Item {
+        Resource resource{};
+        std::string path;
+        std::string uri;
+        TickType_t started = 0;
+        uint32_t duration_ms = 0;
+        bool observed_playing = false;
+        bool next_action_sent = false;
+    };
 
-    ESP_LOGI(kTag, "Tracking renderer playback (estimated duration=%u ms)", duration_ms);
-    while (!stopping_.load() && network_available_.load() &&
-           !network_lost_.load() &&
-           utterance_generation_.load() == utterance_generation) {
-        vTaskDelay(pdMS_TO_TICKS(750));
-        if (stopping_.load() || !network_available_.load() || network_lost_.load()) break;
-
-        DlnaTransportState state = DlnaTransportState::kUnknown;
-        if (DlnaControl::GetTransportState(renderer_, state, 2500)) {
-            transport_query_succeeded = true;
-            if (state == DlnaTransportState::kPlaying) {
-                observed_playing = true;
-            } else if (observed_playing && state == DlnaTransportState::kStopped) {
-                ESP_LOGI(kTag, "Renderer reports playback completed");
-                break;
-            }
-        }
-
-        const uint32_t elapsed_ms = static_cast<uint32_t>(
-            (xTaskGetTickCount() - started) * portTICK_PERIOD_MS);
-        if (!observed_playing && elapsed_ms >= fallback_wait_ms) {
-            ESP_LOGW(kTag,
-                     "No PLAYING state observed; releasing resource after duration-based safety wait (transport queries=%d)",
-                     transport_query_succeeded);
-            break;
-        }
-        if (observed_playing && elapsed_ms >= 120000) {
-            ESP_LOGW(kTag, "Playback state did not return to STOPPED; applying 120 s safety limit");
-            break;
-        }
-    }
-}
-
-void DlnaPlaybackManager::ProcessResource(const Resource& resource) {
-    if (resource.wav_data == nullptr || resource.wav_size == 0) return;
-
-    if (resource.utterance_generation != utterance_generation_.load()) {
-        heap_caps_free(resource.wav_data);
-        ESP_LOGI(kTag, "Skipping queued segment from an aborted utterance");
-        return;
-    }
-    if (!renderer_ready_) {
-        heap_caps_free(resource.wav_data);
-        return;
-    }
+    auto recycle_buffer = [this](uint8_t index) {
+        if (index >= kBufferCount) return;
+        const bool recycled = buffers_[index].Initialize();
+        std::lock_guard<std::mutex> lock(buffer_mutex_);
+        buffer_ready_[index] = recycled;
+        buffer_active_[index] = false;
+        buffer_dropping_[index] = false;
+        if (!buffer_ready_[write_buffer_index_] && recycled) write_buffer_index_ = index;
+        if (!recycled) ESP_LOGE(kTag, "Could not recycle PCM buffer %u",
+                                static_cast<unsigned>(index));
+    };
 
     std::string host;
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
         host = host_ipv4_;
     }
-
-    // One HTTP server stays alive for the renderer session. Every segment has
-    // a unique immutable URL and registry-managed lifetime.
+    if (first_resource.wav_data == nullptr || first_resource.wav_size < 44) {
+        if (first_resource.wav_data) heap_caps_free(first_resource.wav_data);
+        return;
+    }
+    if (first_resource.utterance_generation != utterance_generation_.load() ||
+        !renderer_ready_) {
+        heap_caps_free(first_resource.wav_data);
+        return;
+    }
     if (!media_server_.IsRunning() &&
         !media_server_.Start(host, resource_registry_)) {
-        heap_caps_free(resource.wav_data);
+        heap_caps_free(first_resource.wav_data);
         ESP_LOGE(kTag, "Could not start registry-backed media server");
         renderer_ready_ = false;
         sink_ready_.store(false);
         return;
     }
 
-    const uint32_t sequence = ++resource_sequence_;
-    std::string resource_path;
-    if (!resource_registry_.Publish(resource.utterance_generation, sequence,
-                                    resource.wav_data, resource.wav_size,
-                                    resource_path)) {
-        heap_caps_free(resource.wav_data);
-        ESP_LOGE(kTag, "Could not publish WAV resource into registry");
+    auto publish_item = [this](Item& item) -> bool {
+        if (item.resource.wav_data == nullptr || item.resource.wav_size < 44) return false;
+        const uint32_t sequence = ++resource_sequence_;
+        if (!resource_registry_.Publish(item.resource.utterance_generation, sequence,
+                                        item.resource.wav_data, item.resource.wav_size,
+                                        item.path)) return false;
+        item.uri = media_server_.GetMediaUri() + item.path.substr(std::strlen("/dlna/"));
+        const uint8_t* wav = item.resource.wav_data;
+        const uint32_t byte_rate = static_cast<uint32_t>(wav[28]) |
+            (static_cast<uint32_t>(wav[29]) << 8) |
+            (static_cast<uint32_t>(wav[30]) << 16) |
+            (static_cast<uint32_t>(wav[31]) << 24);
+        const uint32_t data_size = static_cast<uint32_t>(wav[40]) |
+            (static_cast<uint32_t>(wav[41]) << 8) |
+            (static_cast<uint32_t>(wav[42]) << 16) |
+            (static_cast<uint32_t>(wav[43]) << 24);
+        item.duration_ms = byte_rate == 0 ? 0 : static_cast<uint32_t>(
+            (static_cast<uint64_t>(data_size) * 1000) / byte_rate);
+        item.resource.wav_data = nullptr;  // Registry owns it from here.
+        return true;
+    };
+
+    Item current{};
+    current.resource = first_resource;
+    if (!publish_item(current)) {
+        heap_caps_free(current.resource.wav_data);
+        ESP_LOGE(kTag, "Could not publish initial WAV resource");
         return;
     }
-
-    const std::string media_uri = media_server_.GetMediaUri() +
-                                  std::to_string(resource.utterance_generation) +
-                                  "/" + std::to_string(sequence) + ".wav";
-    current_wav_ = resource.wav_data;  // Non-owning; registry owns until Retire().
-    ESP_LOGI(kTag, "Published immutable DLNA resource %s (%u bytes)",
-             media_uri.c_str(), static_cast<unsigned>(resource.wav_size));
-
-    if (!DlnaControl::SetUriAndPlay(renderer_, media_uri,
+    if (!DlnaControl::SetUriAndPlay(renderer_, current.uri,
                                     "EchoEar audio", kControlTimeoutMs)) {
-        ESP_LOGE(kTag, "Renderer rejected SetAVTransportURI/Play");
-        resource_registry_.Retire(resource_path);
-        current_wav_ = nullptr;
+        resource_registry_.Retire(current.path);
         renderer_ready_ = false;
         sink_ready_.store(false);
         return;
     }
+    current.started = xTaskGetTickCount();
+    ESP_LOGI(kTag, "Started DLNA item %s (%u ms)",
+             current.uri.c_str(), current.duration_ms);
 
-    if (resource.utterance_generation != utterance_generation_.load()) {
-        DlnaControl::Stop(renderer_, kControlTimeoutMs);
-        resource_registry_.Retire(resource_path);
-        current_wav_ = nullptr;
-        return;
+    Item next{};
+    bool have_next = false;
+    TickType_t next_poll = xTaskGetTickCount();
+    TickType_t stopped_since = 0;
+
+    while (!stopping_.load() && network_available_.load() &&
+           !network_lost_.load() &&
+           current.resource.utterance_generation == utterance_generation_.load()) {
+        if (!have_next) {
+            Resource queued{};
+            if (xQueueReceive(resource_queue_, &queued, pdMS_TO_TICKS(100)) == pdTRUE) {
+                recycle_buffer(queued.buffer_index);
+                if (queued.wav_data != nullptr) {
+                    if (queued.utterance_generation != utterance_generation_.load()) {
+                        heap_caps_free(queued.wav_data);
+                    } else {
+                        next.resource = queued;
+                        if (publish_item(next)) {
+                            have_next = true;
+                            ESP_LOGI(kTag, "Prepared next DLNA item %s", next.uri.c_str());
+                        } else {
+                            heap_caps_free(next.resource.wav_data);
+                            next = Item{};
+                            ESP_LOGW(kTag, "Could not publish look-ahead item");
+                        }
+                    }
+                }
+            }
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+
+        if (stopping_.load() || !network_available_.load() || network_lost_.load() ||
+            current.resource.utterance_generation != utterance_generation_.load()) break;
+
+        if (xTaskGetTickCount() < next_poll) continue;
+        next_poll = xTaskGetTickCount() + pdMS_TO_TICKS(650);
+
+        DlnaTransportState transport = DlnaTransportState::kUnknown;
+        const bool state_ok = DlnaControl::GetTransportState(renderer_, transport, 1500);
+        if (state_ok && transport == DlnaTransportState::kPlaying) {
+            current.observed_playing = true;
+            stopped_since = 0;
+        }
+
+        bool next_is_current = false;
+        if (have_next && next.next_action_sent) {
+            std::string renderer_uri;
+            if (DlnaControl::GetCurrentUri(renderer_, renderer_uri, 1500)) {
+                next_is_current = renderer_uri == next.uri;
+            }
+        }
+        if (next_is_current) {
+            ESP_LOGI(kTag, "Renderer transitioned to preloaded item");
+            resource_registry_.Retire(current.path);
+            current = std::move(next);
+            next = Item{};
+            have_next = false;
+            current.started = xTaskGetTickCount();
+            current.observed_playing = state_ok && transport == DlnaTransportState::kPlaying;
+            stopped_since = 0;
+            continue;
+        }
+
+        if (have_next && current.observed_playing && !next.next_action_sent &&
+            renderer_.supports_set_next_av_transport_uri) {
+            next.next_action_sent = DlnaControl::SetNextUri(
+                renderer_, next.uri, "EchoEar audio", kControlTimeoutMs);
+            if (!next.next_action_sent) {
+                ESP_LOGW(kTag, "SetNext rejected; sequential fallback retained");
+            }
+        }
+
+        const uint32_t elapsed_ms = static_cast<uint32_t>(
+            (xTaskGetTickCount() - current.started) * portTICK_PERIOD_MS);
+        const bool duration_expired = !current.observed_playing &&
+            elapsed_ms >= std::min<uint32_t>(current.duration_ms + 5000, 120000);
+        const bool stopped_after_play = state_ok &&
+            transport == DlnaTransportState::kStopped && current.observed_playing;
+        if (stopped_after_play || duration_expired) {
+            if (have_next) {
+                if (DlnaControl::SetUriAndPlay(renderer_, next.uri,
+                                               "EchoEar audio", kControlTimeoutMs)) {
+                    resource_registry_.Retire(current.path);
+                    current = std::move(next);
+                    next = Item{};
+                    have_next = false;
+                    current.started = xTaskGetTickCount();
+                    current.observed_playing = false;
+                    stopped_since = 0;
+                    ESP_LOGI(kTag, "Started next item using sequential fallback");
+                    continue;
+                }
+                ESP_LOGE(kTag, "Could not start next DLNA item");
+                break;
+            }
+            if (stopped_since == 0) {
+                stopped_since = xTaskGetTickCount();
+                continue;
+            }
+            if ((xTaskGetTickCount() - stopped_since) >= pdMS_TO_TICKS(700)) {
+                ESP_LOGI(kTag, "Current DLNA item completed");
+                break;
+            }
+        }
     }
 
-    WaitForPlaybackCompletion(resource.wav_size, resource.utterance_generation);
-    if (resource.utterance_generation != utterance_generation_.load() ||
-        network_lost_.load() || !network_available_.load()) {
+    if (stopping_.load() || !network_available_.load() || network_lost_.load() ||
+        current.resource.utterance_generation != utterance_generation_.load()) {
         DlnaControl::Stop(renderer_, kControlTimeoutMs);
     }
-
-    // Retire prevents new requests immediately; active HTTP leases defer free.
-    resource_registry_.Retire(resource_path);
-    current_wav_ = nullptr;
+    resource_registry_.Retire(current.path);
+    if (have_next) resource_registry_.Retire(next.path);
 }
 
 void DlnaPlaybackManager::Worker() {
@@ -646,7 +716,6 @@ void DlnaPlaybackManager::Worker() {
                 media_server_.Stop();
             }
             resource_registry_.RetireAll();
-            current_wav_ = nullptr;
             renderer_ready_ = false;
             next_discovery = 0;
             ESP_LOGI(kTag, "Network loss/reconnect: released active DLNA resource");
@@ -696,6 +765,5 @@ void DlnaPlaybackManager::Worker() {
         media_server_.Stop();
     }
     resource_registry_.RetireAll();
-    current_wav_ = nullptr;
     renderer_ready_ = false;
 }
