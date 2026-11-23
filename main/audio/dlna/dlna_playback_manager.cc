@@ -687,7 +687,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         return;
     }
     current.started = xTaskGetTickCount();
-    current.resource.finalized_us = current.resource.finalized_us;
+    current.resource.control_response_us = control_finished_us;
     ESP_LOGI(kTag, "Started DLNA item %s (%u ms)",
              current.uri.c_str(), current.duration_ms);
 
@@ -769,7 +769,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                 const int64_t playing_observed_us = esp_timer_get_time();
                 ESP_LOGI(kTag, "Timing renderer PLAYING observed: pcm_to_playing=%lldms play_response_to_playing=%lldms",
                          static_cast<long long>((playing_observed_us - current.resource.first_pcm_us) / 1000),
-                         static_cast<long long>((playing_observed_us - control_finished_us) / 1000));
+                         static_cast<long long>((playing_observed_us - current.resource.control_response_us) / 1000));
             }
             current.observed_playing = true;
             stopped_since = 0;
@@ -789,6 +789,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             next = Item{};
             have_next = false;
             current.started = xTaskGetTickCount();
+            current.resource.control_response_us = esp_timer_get_time();
             current.observed_playing = state_ok && transport == DlnaTransportState::kPlaying;
             stopped_since = 0;
             unexpected_uri_mismatch_count = 0;
@@ -1059,6 +1060,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                     next = Item{};
                     have_next = false;
                     current.started = xTaskGetTickCount();
+                    current.resource.control_response_us = esp_timer_get_time();
                     current.observed_playing = false;
                     stopped_since = 0;
                     ESP_LOGI(kTag, "Started next item using sequential fallback");
@@ -1251,10 +1253,11 @@ void DlnaPlaybackManager::Worker() {
 
         Resource resource{};
         if (xQueueReceive(resource_queue_, &resource, pdMS_TO_TICKS(100)) == pdTRUE) {
-            ESP_LOGI(kTag, "Dequeued DLNA segment: %u ms, queue_depth=%u/%u",
+            ESP_LOGI(kTag, "Dequeued DLNA segment: %u ms, queue_depth=%u/%u queue_wait=%lldms",
                      static_cast<unsigned>(resource.duration_ms),
                      static_cast<unsigned>(uxQueueMessagesWaiting(resource_queue_)),
-                     static_cast<unsigned>(kQueueDepth));
+                     static_cast<unsigned>(kQueueDepth),
+                     static_cast<long long>((esp_timer_get_time() - resource.finalized_us) / 1000));
             // The normal path recycles the buffer before network work. The
             // allocation belongs to the worker now; the WAV resource remains
             // independent and immutable.
