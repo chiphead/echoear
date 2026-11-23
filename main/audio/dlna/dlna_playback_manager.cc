@@ -620,7 +620,8 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         if (have_next && next.next_action_sent) {
             std::string renderer_uri;
             if (DlnaControl::GetCurrentUri(renderer_, renderer_uri, 1500)) {
-                next_is_current = renderer_uri == next.uri;
+                next_is_current = renderer_uri == next.uri && state_ok &&
+                                  transport == DlnaTransportState::kPlaying;
             }
         }
         if (next_is_current) {
