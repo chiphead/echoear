@@ -211,7 +211,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         sample_count % static_cast<size_t>(channels) != 0) {
         if (utterance_decided_ && !fallback_utterance_) {
             buffer_dropping_[write_buffer_index_] = true;
-            ESP_LOGW(kTag, "Invalid PCM frame; dropping the remainder of the DLNA utterance");
+            callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
             return true;
         }
         return false;
@@ -239,7 +239,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
     };
 
     if (channels != resampler_channels_) {
-        ESP_LOGW(kTag, "PCM channel count changed during DLNA output");
+        callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
         return reject_frame();
     }
 
@@ -251,8 +251,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
     if (sample_rate != kDlnaSampleRate) {
         if (!output_format_ready_ || resampler_ == nullptr ||
             sample_rate != resampler_source_rate_ || channels != resampler_channels_) {
-            ESP_LOGW(kTag, "Unsupported PCM input format %d Hz/%d ch",
-                     sample_rate, channels);
+            callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
             return reject_frame();
         }
         uint32_t max_output_frames = 0;
@@ -260,7 +259,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         if (esp_ae_rate_cvt_get_max_out_sample_num(resampler_, input_frames,
                                                    &max_output_frames) != ESP_AE_ERR_OK ||
             static_cast<size_t>(max_output_frames) * channels > resampled_pcm_.size()) {
-            ESP_LOGW(kTag, "PCM resampler output exceeds prepared frame capacity");
+            callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
             return reject_frame();
         }
         uint32_t actual_output_frames = max_output_frames;
@@ -268,7 +267,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
             resampler_, (esp_ae_sample_t*)samples, input_frames,
             (esp_ae_sample_t*)resampled_pcm_.data(), &actual_output_frames);
         if (convert_ret != ESP_AE_ERR_OK || actual_output_frames == 0) {
-            ESP_LOGW(kTag, "PCM resampling failed (%d)", convert_ret);
+            callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
             return reject_frame();
         }
         output_samples = resampled_pcm_.data();
@@ -287,7 +286,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         } else {
             if (!new_utterance) {
                 buffer_dropping_[index] = true;
-                ESP_LOGW(kTag, "No free PCM buffer; dropping remaining frames of current DLNA utterance");
+                callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
             // The first frame has not been accepted by DLNA yet. Preserve the
@@ -300,7 +299,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
     if (buffer_dropping_[index]) return true;
     if (!buffer_active_[index]) {
         if (!buffers_[index].Begin(sample_rate, channels)) {
-            ESP_LOGE(kTag, "Could not begin DLNA PCM segment");
+            callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
             return reject_frame();
         }
         buffer_active_[index] = true;
@@ -316,13 +315,13 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         if (aligned_remaining == 0) {
             if (!QueueSegmentLocked(index)) {
                 buffer_dropping_[index] = true;
-                ESP_LOGE(kTag, "DLNA segment queue/buffer unavailable; dropping utterance tail");
+                callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
             const int available = FindReadyBufferLocked(index);
             if (available < 0) {
                 buffer_dropping_[index] = true;
-                ESP_LOGE(kTag, "No free PCM buffer for next DLNA segment; dropping utterance tail");
+                callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
             index = static_cast<uint8_t>(available);
@@ -338,7 +337,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         const size_t chunk_samples = std::min(output_sample_count - offset, aligned_remaining);
         if (!buffers_[index].Append(output_samples + offset, chunk_samples)) {
             buffer_dropping_[index] = true;
-            ESP_LOGE(kTag, "Invalid PCM frame while splitting DLNA segment");
+            callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
             return true;
         }
         offset += chunk_samples;
@@ -346,7 +345,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         if (offset < output_sample_count) {
             if (!QueueSegmentLocked(index)) {
                 buffer_dropping_[index] = true;
-                ESP_LOGE(kTag, "Could not queue completed DLNA segment");
+                callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
             const int available = FindReadyBufferLocked(index);
@@ -393,20 +392,14 @@ bool DlnaPlaybackManager::QueueSegmentLocked(uint8_t index) {
         (static_cast<uint32_t>(resource.wav_data[41]) << 8) |
         (static_cast<uint32_t>(resource.wav_data[42]) << 16) |
         (static_cast<uint32_t>(resource.wav_data[43]) << 24);
-    const uint32_t segment_duration_ms =
-        byte_rate == 0 ? 0 : static_cast<uint32_t>(
-            (static_cast<uint64_t>(pcm_bytes) * 1000) / byte_rate);
+    resource.duration_ms = byte_rate == 0 ? 0 : static_cast<uint32_t>(
+        (static_cast<uint64_t>(pcm_bytes) * 1000) / byte_rate);
     if (xQueueSend(resource_queue_, &resource, 0) != pdTRUE) {
         heap_caps_free(resource.wav_data);
         recycle_mask_.fetch_or(1u << index);
-        ESP_LOGW(kTag, "DLNA segment queue full; dropping this segment (%u ms)",
-                 static_cast<unsigned>(segment_duration_ms));
+        queue_drop_count_.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
-    ESP_LOGI(kTag, "Queued DLNA segment: %u ms, queue_depth=%u/%u",
-             static_cast<unsigned>(segment_duration_ms),
-             static_cast<unsigned>(uxQueueMessagesWaiting(resource_queue_)),
-             static_cast<unsigned>(kQueueDepth));
     return true;
 }
 
@@ -422,7 +415,6 @@ void DlnaPlaybackManager::EndUtterance() {
             fallback_utterance_ = false;
             utterance_decided_ = false;
             discard_until_drain_ = false;
-            ESP_LOGI(kTag, "Discarded interrupted DLNA utterance");
             return;
         }
         if (fallback_utterance_) {
@@ -436,12 +428,12 @@ void DlnaPlaybackManager::EndUtterance() {
             buffer_dropping_[index] = false;
             utterance_decided_ = false;
             fallback_utterance_ = false;
-            ESP_LOGW(kTag, "Dropped the remainder of an utterance after DLNA segment capacity was exhausted");
+            callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
             return;
         }
         if (buffer_active_[index] && buffer_ready_[index]) {
             if (!QueueSegmentLocked(index)) {
-                ESP_LOGW(kTag, "Could not publish final DLNA segment");
+                callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
             }
         }
         utterance_decided_ = false;
@@ -812,6 +804,19 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
 void DlnaPlaybackManager::Worker() {
     TickType_t next_discovery = 0;
     while (!stopping_.load()) {
+        const uint32_t callback_issues =
+            callback_issue_count_.exchange(0, std::memory_order_relaxed);
+        if (callback_issues > 0) {
+            ESP_LOGW(kTag, "Audio callback reported %u DLNA PCM issue(s)",
+                     static_cast<unsigned>(callback_issues));
+        }
+        const uint32_t queue_drops =
+            queue_drop_count_.exchange(0, std::memory_order_relaxed);
+        if (queue_drops > 0) {
+            ESP_LOGW(kTag, "Resource queue full; dropped %u DLNA segment(s)",
+                     static_cast<unsigned>(queue_drops));
+        }
+
         // Recycle requests are independent of the bounded resource queue, so
         // a full queue cannot permanently consume one of the three PCM buffers.
         uint32_t recycle = recycle_mask_.exchange(0);
@@ -861,6 +866,10 @@ void DlnaPlaybackManager::Worker() {
 
         Resource resource{};
         if (xQueueReceive(resource_queue_, &resource, pdMS_TO_TICKS(100)) == pdTRUE) {
+            ESP_LOGI(kTag, "Dequeued DLNA segment: %u ms, queue_depth=%u/%u",
+                     static_cast<unsigned>(resource.duration_ms),
+                     static_cast<unsigned>(uxQueueMessagesWaiting(resource_queue_)),
+                     static_cast<unsigned>(kQueueDepth));
             // The normal path recycles the buffer before network work. The
             // allocation belongs to the worker now; the WAV resource remains
             // independent and immutable.
