@@ -156,7 +156,9 @@ bool DlnaControl::GetCurrentUri(const DlnaRenderer& renderer,
         uri.clear();
         return false;
     }
-    if (!DlnaXml::ExtractValue(response, "CurrentURI", uri)) {
+    // An empty CurrentURI is meaningful when AVTransport reports
+    // NO_MEDIA_PRESENT; preserve it instead of conflating it with parse failure.
+    if (!DlnaXml::ExtractValue(response, "CurrentURI", uri, true)) {
         uri.clear();
         return false;
     }
