@@ -10,8 +10,8 @@ int main() {
     const std::string metadata =
         DlnaXml::BuildDidlMetadata("http://192.0.2.1/a?x=1&y=2", "T&<est");
     assert(metadata.find("xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\"") !=
-    assert(metadata.find('\\\\') == std::string::npos);
-    assert(metadata.find("xmlns=\\\\\"") == std::string::npos);
+           std::string::npos);
+    assert(metadata.find('\\') == std::string::npos);
     assert(metadata.find("<dc:title>T&amp;&lt;est</dc:title>") != std::string::npos);
     assert(metadata.find("http://192.0.2.1/a?x=1&amp;y=2") != std::string::npos);
     assert(DlnaXml::BuildDidlMetadata("http://example.test/a.wav", "").find(
