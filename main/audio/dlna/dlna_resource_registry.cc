@@ -1,5 +1,7 @@
 #include "dlna_resource_registry.h"
 
+#include <climits>
+
 #include <esp_heap_caps.h>
 #include <esp_log.h>
 
@@ -14,7 +16,8 @@ DlnaResourceRegistry::~DlnaResourceRegistry() {
 bool DlnaResourceRegistry::Publish(uint32_t generation, uint32_t sequence,
                                    uint8_t* wav_data, size_t wav_size,
                                    std::string& path) {
-    if (wav_data == nullptr || wav_size < 44) return false;
+    if (wav_data == nullptr || wav_size < 44 ||
+        wav_size > static_cast<size_t>(INT_MAX)) return false;
 
     std::lock_guard<std::mutex> lock(mutex_);
     for (const auto& entry : entries_) {
