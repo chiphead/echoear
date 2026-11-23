@@ -284,11 +284,13 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
             index = static_cast<uint8_t>(available);
             write_buffer_index_ = index;
         } else {
-            if (utterance_decided_ && !fallback_utterance_) {
+            if (!new_utterance) {
                 buffer_dropping_[index] = true;
                 ESP_LOGW(kTag, "No free PCM buffer; dropping remaining frames of current DLNA utterance");
                 return true;
             }
+            // The first frame has not been accepted by DLNA yet. Preserve the
+            // utterance-level routing invariant by falling back locally now.
             fallback_utterance_ = true;
             return false;
         }
