@@ -138,3 +138,18 @@ This is persistent multi-URL serving with sequential AVTransport commands, not g
 - The method refuses to send the action unless the parsed renderer SCPD explicitly advertised `SetNextAVTransportURI`.
 - This API is not yet called by the playback manager. The current worker remains sequential and continues using `SetAVTransportURI` + `Play` for each segment.
 - The ESP-IDF 6.1 HTTP server implementation was checked: `httpd_stop()` waits until the HTTPD task reaches `THREAD_STOPPED` before deleting the server instance. The media server now preserves its handle/context if `httpd_stop()` reports failure rather than pretending handlers have exited.
+
+## Current-next playback pipeline implementation
+
+The playback manager has now been advanced beyond the earlier blocking sequential worker:
+
+- `ProcessResource()` starts the current item, then continues polling AVTransport while also draining one queued WAV segment as a look-ahead item.
+- The current and next WAVs are published simultaneously in the two-entry registry. The current resource is not retired until the renderer's `CurrentURI` is observed changing to the preloaded next URI, or a sequential fallback has successfully started the next item.
+- When the SCPD advertises `SetNextAVTransportURI`, the worker attempts it once after observing the current item in PLAYING state. A rejected action is not retried in a tight loop.
+- Added `GetMediaInfo` / `CurrentURI` querying to confirm the actual transition rather than assuming that a successful SOAP response means playback has switched.
+- If the next action is unavailable or rejected, the worker retains the next resource and uses `SetAVTransportURI` + `Play` after the current item stops.
+- During a possible next-item transition, both resources remain retained for a short observation window before sequential fallback, avoiding immediate replay if the renderer's state temporarily reports STOPPED.
+
+This is now a capability-gated preloading implementation, but it is not yet a verified gapless implementation. The X88 may accept the action but fetch the next file too late, reject it during playback, or report its CurrentURI differently. Those behaviors require hardware validation. If URI observation fails, the conservative fallback may introduce a gap; it must not free the current resource early.
+
+The worker still handles at most one look-ahead item because the registry is deliberately bounded to two resources (current + next). Additional finalized segments remain in the bounded FreeRTOS queue until a slot becomes available. If the renderer holds an HTTP request open beyond the transition, a subsequent Publish can fail when both registry slots remain occupied; that path currently drops the queued segment rather than overwriting a live resource.
