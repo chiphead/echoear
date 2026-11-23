@@ -80,11 +80,19 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
     const uint8_t index = write_buffer_index_;
     if (!buffer_ready_[index]) return false;
 
+    if (buffer_dropping_[index]) return true;
     if (!buffer_active_[index]) {
         if (!buffers_[index].Begin(sample_rate, channels)) return false;
         buffer_active_[index] = true;
     }
-    return buffers_[index].Append(samples, sample_count);
+    if (!buffers_[index].Append(samples, sample_count)) {
+        // Do not fall back mid-utterance: that would play only its tail locally
+        // after earlier frames had already been consumed by the DLNA sink.
+        buffer_dropping_[index] = true;
+        ESP_LOGE(kTag, "Dropping oversized/invalid utterance instead of splitting output");
+        return true;
+    }
+    return true;
 }
 
 void DlnaPlaybackManager::EndUtterance() {
@@ -92,6 +100,13 @@ void DlnaPlaybackManager::EndUtterance() {
     {
         std::lock_guard<std::mutex> lock(buffer_mutex_);
         const uint8_t index = write_buffer_index_;
+        if (buffer_dropping_[index]) {
+            buffers_[index].Reset();
+            buffer_active_[index] = false;
+            buffer_dropping_[index] = false;
+            ESP_LOGW(kTag, "Discarded utterance that exceeded the PCM limit");
+            return;
+        }
         if (!buffer_active_[index] || !buffer_ready_[index]) return;
 
         if (!buffers_[index].FinalizeWav(&resource.wav_data, &resource.wav_size)) {
@@ -175,6 +190,8 @@ void DlnaPlaybackManager::ProcessResource(const Resource& resource) {
     if (!media_server_.Start(host_ipv4_, resource.wav_data, resource.wav_size)) {
         heap_caps_free(resource.wav_data);
         ESP_LOGE(kTag, "Could not publish WAV resource");
+        renderer_ready_ = false;
+        sink_ready_.store(false);
         return;
     }
 
@@ -183,6 +200,8 @@ void DlnaPlaybackManager::ProcessResource(const Resource& resource) {
         ESP_LOGE(kTag, "Renderer rejected SetAVTransportURI/Play");
         media_server_.Stop();
         heap_caps_free(resource.wav_data);
+        renderer_ready_ = false;
+        sink_ready_.store(false);
         return;
     }
 
@@ -212,6 +231,7 @@ void DlnaPlaybackManager::Worker() {
                 std::lock_guard<std::mutex> lock(buffer_mutex_);
                 buffer_ready_[resource.buffer_index] = recycled;
                 buffer_active_[resource.buffer_index] = false;
+                buffer_dropping_[resource.buffer_index] = false;
                 if (!buffer_ready_[write_buffer_index_] && recycled) {
                     write_buffer_index_ = resource.buffer_index;
                 }
