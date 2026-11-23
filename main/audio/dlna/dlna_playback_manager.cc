@@ -476,6 +476,14 @@ void DlnaPlaybackManager::FinalizePendingUtteranceLocked() {
         callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
     } else if (buffer_active_[index] && buffer_ready_[index]) {
         if (!QueueSegmentLocked(index)) {
+            // FinalizeWav() can fail before ownership transfers, leaving the
+            // accumulator allocated and marked ready. Queue-full failure has
+            // already transferred/freed the WAV and schedules async recycle.
+            // Reset only in the former case; never touch a buffer owned by
+            // the recycle worker.
+            if (buffer_ready_[index]) buffers_[index].Reset();
+            buffer_active_[index] = false;
+            buffer_dropping_[index] = false;
             callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
         }
     }
