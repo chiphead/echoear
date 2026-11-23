@@ -37,13 +37,13 @@ DlnaPcmBuffer::~DlnaPcmBuffer() {
 bool DlnaPcmBuffer::Initialize() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (pcm_data_ != nullptr) return true;
-    if (max_pcm_bytes_ == 0 || max_pcm_bytes_ > UINT32_MAX - 36) return false;
+    if (max_pcm_bytes_ == 0 || max_pcm_bytes_ > UINT32_MAX - 44) return false;
 
     pcm_data_ = static_cast<uint8_t*>(
-        heap_caps_malloc(max_pcm_bytes_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        heap_caps_malloc(kWavHeaderSize + max_pcm_bytes_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (pcm_data_ == nullptr) {
         pcm_data_ = static_cast<uint8_t*>(
-            heap_caps_malloc(max_pcm_bytes_, MALLOC_CAP_8BIT));
+            heap_caps_malloc(kWavHeaderSize + max_pcm_bytes_, MALLOC_CAP_8BIT));
     }
     if (pcm_data_ == nullptr) {
         ESP_LOGE(kTag, "Unable to allocate %u-byte PCM buffer",
@@ -79,7 +79,7 @@ bool DlnaPcmBuffer::Append(const int16_t* samples, size_t sample_count) {
         return false;
     }
     const size_t bytes = sample_count * sizeof(int16_t);
-    std::memcpy(pcm_data_ + pcm_size_, samples, bytes);
+    std::memcpy(pcm_data_ + kWavHeaderSize + pcm_size_, samples, bytes);
     pcm_size_ += bytes;
     return true;
 }
@@ -96,18 +96,10 @@ bool DlnaPcmBuffer::FinalizeWav(uint8_t** wav_data, size_t* wav_size) {
         return false;
     }
 
-    const size_t total_size = kWavHeaderSize + pcm_size_;
-    auto* wav = static_cast<uint8_t*>(
-        heap_caps_malloc(total_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (wav == nullptr) {
-        wav = static_cast<uint8_t*>(heap_caps_malloc(total_size, MALLOC_CAP_8BIT));
-    }
-    if (wav == nullptr) {
-        ESP_LOGE(kTag, "Unable to allocate %u-byte WAV resource",
-                 static_cast<unsigned>(total_size));
-        return false;
-    }
-
+    // The allocation reserves the WAV header in front of the PCM payload.
+    // Finalization therefore only writes 44 bytes and transfers ownership; it
+    // never allocates/copies a potentially large utterance while holding mutex_.
+    uint8_t* wav = pcm_data_;
     const uint32_t byte_rate =
         static_cast<uint32_t>(sample_rate_) * static_cast<uint32_t>(channels_) * 2;
     const uint16_t block_align = static_cast<uint16_t>(channels_ * 2);
@@ -123,10 +115,10 @@ bool DlnaPcmBuffer::FinalizeWav(uint8_t** wav_data, size_t* wav_size) {
     Put16(wav + 34, 16);
     std::memcpy(wav + 36, "data", 4);
     Put32(wav + 40, static_cast<uint32_t>(pcm_size_));
-    std::memcpy(wav + kWavHeaderSize, pcm_data_, pcm_size_);
 
     *wav_data = wav;
-    *wav_size = total_size;
+    *wav_size = kWavHeaderSize + pcm_size_;
+    pcm_data_ = nullptr;  // Ownership transfers to the caller (heap_caps_free).
     active_ = false;
     ESP_LOGI(kTag, "Finalized PCM utterance: %u Hz, %d channel(s), %u PCM bytes",
              static_cast<unsigned>(sample_rate_), channels_,
