@@ -21,6 +21,20 @@ inline std::string Escape(const std::string& value) {
     return escaped;
 }
 
+inline std::string BuildDidlMetadata(const std::string& media_uri,
+                                       const std::string& title) {
+    const std::string safe_title = title.empty() ? "EchoEar audio" : title;
+    return
+        "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" "
+        "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" "
+        "xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\">"
+        "<item id=\"0\" parentID=\"-1\" restricted=\"1\">"
+        "<dc:title>" + Escape(safe_title) + "</dc:title>"
+        "<upnp:class>object.item.audioItem.musicTrack</upnp:class>"
+        "<res protocolInfo=\"http-get:*:audio/wav:*\">" +
+        Escape(media_uri) + "</res></item></DIDL-Lite>";
+}
+
 inline std::string Unescape(std::string value) {
     const std::pair<const char*, const char*> entities[] = {
         {"&quot;", "\""}, {"&apos;", "'"}, {"&lt;", "<"},
