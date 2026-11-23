@@ -165,6 +165,36 @@ bool DlnaControl::GetCurrentUri(const DlnaRenderer& renderer,
     return true;
 }
 
+
+bool DlnaControl::GetPositionInfo(const DlnaRenderer& renderer,
+                                  std::string& track_duration,
+                                  std::string& relative_time,
+                                  std::string& track_uri,
+                                  uint32_t timeout_ms) {
+    track_duration.clear();
+    relative_time.clear();
+    track_uri.clear();
+
+    std::string response;
+    if (!Invoke(renderer, "GetPositionInfo",
+                "<InstanceID>0</InstanceID>", timeout_ms, &response)) {
+        return false;
+    }
+
+    const bool duration_ok =
+        DlnaXml::ExtractValue(response, "TrackDuration", track_duration);
+    const bool relative_time_ok =
+        DlnaXml::ExtractValue(response, "RelTime", relative_time);
+    const bool track_uri_ok =
+        DlnaXml::ExtractValue(response, "TrackURI", track_uri, true);
+    if (!duration_ok || !relative_time_ok || !track_uri_ok) {
+        ESP_LOGW(kTag, "GetPositionInfo response missing fields: duration=%d rel_time=%d track_uri=%d",
+                 duration_ok, relative_time_ok, track_uri_ok);
+        return false;
+    }
+    return true;
+}
+
 bool DlnaControl::GetTransportState(const DlnaRenderer& renderer,
                                     DlnaTransportState& state,
                                     uint32_t timeout_ms) {
