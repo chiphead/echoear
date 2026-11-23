@@ -780,7 +780,22 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         const bool duration_expired = elapsed_ms >= playback_watchdog_ms;
         const bool renderer_stopped = state_ok &&
             transport == DlnaTransportState::kStopped;
-        const bool stopped_after_play = renderer_stopped && current.observed_playing;
+        // NO_MEDIA_PRESENT is not equivalent to STOPPED. Some renderers use it
+        // after clearing their current item; only treat it as terminal when a
+        // separate GetMediaInfo confirms that CurrentURI is empty. If the old
+        // URI is still advertised (or the query fails), retain the WAV and let
+        // the normal watchdog/Stop recovery handle the ambiguous state.
+        bool no_media_uri_confirmed_empty = false;
+        if (state_ok && transport == DlnaTransportState::kNoMediaPresent) {
+            std::string renderer_uri;
+            no_media_uri_confirmed_empty =
+                DlnaControl::GetCurrentUri(renderer_, renderer_uri, 1500) &&
+                renderer_uri.empty();
+        }
+        const bool no_media_terminal =
+            no_media_uri_confirmed_empty && elapsed_ms >= 1500;
+        const bool stopped_after_play =
+            (renderer_stopped && current.observed_playing) || no_media_terminal;
         const bool next_transition_pending = have_next && next.published &&
             next.next_action_maybe_accepted &&
             (next.next_uri_observed ||
