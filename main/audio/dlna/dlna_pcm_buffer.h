@@ -26,6 +26,7 @@ public:
     void Reset();
 
     size_t GetPcmBytes() const;
+    size_t GetRemainingPcmBytes() const;
     bool IsActive() const;
 
 private:
