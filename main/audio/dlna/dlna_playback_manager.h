@@ -46,6 +46,7 @@ private:
         size_t wav_size = 0;
         uint8_t buffer_index = 0;
         uint32_t utterance_generation = 0;
+        uint32_t duration_ms = 0;
     };
 
     static void WorkerEntry(void* arg);
@@ -88,6 +89,9 @@ private:
     std::atomic<bool> network_available_{false};
     std::atomic<bool> network_lost_{false};
     std::atomic<uint32_t> recycle_mask_{0};
+    // AudioOutputTask only increments counters; the DLNA worker performs all logging.
+    std::atomic<uint32_t> callback_issue_count_{0};
+    std::atomic<uint32_t> queue_drop_count_{0};
     std::atomic<bool> stopping_{false};
     SemaphoreHandle_t worker_stopped_ = nullptr;
 
