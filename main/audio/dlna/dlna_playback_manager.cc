@@ -196,6 +196,7 @@ void DlnaPlaybackManager::NotifyNetworkDisconnected() {
         buffers_[index].Reset();
         buffer_active_[index] = false;
         buffer_dropping_[index] = false;
+        utterance_dropping_ = false;
         fallback_utterance_ = false;
         utterance_decided_ = false;
         if (resampler_ != nullptr) esp_ae_rate_cvt_reset(resampler_);
