@@ -1179,6 +1179,15 @@ config ECHOEAR_UI_REVIEW
         Temporarily navigates UI pages and prints JPEG snapshots as hex to serial.
         Disable for normal releases.
 
+config DLNA_AUDIO_OUTPUT
+    bool "Route all EchoEar audio to Sony SRS-X88 over DLNA"
+    depends on BOARD_TYPE_ECHOEAR_WAVESHARE_1_32
+    default n
+    help
+        Routes all decoded playback PCM, including speech and prompt sounds,
+        to a Sony SRS-X88 MediaRenderer. Local ES8311 output remains the
+        fallback when the DLNA sink cannot accept a frame.
+
 config DLNA_SONY_X88_SMOKE_TEST
     bool "Run Sony SRS-X88 DLNA WAV smoke test after Wi-Fi connects"
     depends on BOARD_TYPE_ECHOEAR_WAVESHARE_1_32
