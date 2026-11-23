@@ -492,6 +492,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         TickType_t started = 0;
         uint32_t duration_ms = 0;
         bool observed_playing = false;
+        bool next_action_attempted = false;
         bool next_action_sent = false;
     };
 
@@ -634,8 +635,9 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             continue;
         }
 
-        if (have_next && current.observed_playing && !next.next_action_sent &&
+        if (have_next && current.observed_playing && !next.next_action_attempted &&
             renderer_.supports_set_next_av_transport_uri) {
+            next.next_action_attempted = true;
             next.next_action_sent = DlnaControl::SetNextUri(
                 renderer_, next.uri, "EchoEar audio", kControlTimeoutMs);
             if (!next.next_action_sent) {
