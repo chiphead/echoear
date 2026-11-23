@@ -744,6 +744,54 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         if (xTaskGetTickCount() < next_poll) continue;
         next_poll = xTaskGetTickCount() + pdMS_TO_TICKS(650);
 
+        if (have_next && next.published && !next.next_action_attempted &&
+            renderer_.supports_set_next_av_transport_uri) {
+            // SetNextAVTransportURI changes the renderer's future playback
+            // target. Reconfirm that our item still owns AVTransport directly
+            // before issuing it; the periodic observer may be up to 3 seconds
+            // old and another controller could have taken over in that gap.
+            std::string active_uri;
+            if (!DlnaControl::GetCurrentUri(renderer_, active_uri, 1500)) {
+                ESP_LOGW(kTag, "Deferring SetNext: could not confirm active CurrentURI");
+            } else if (active_uri != current.uri) {
+                if (unexpected_uri_mismatch_count < 2) {
+                    ++unexpected_uri_mismatch_count;
+                }
+                ESP_LOGW(kTag,
+                         "Deferring SetNext because CurrentURI no longer matches active item (%u/2 confirmations)",
+                         static_cast<unsigned>(unexpected_uri_mismatch_count));
+                if (unexpected_uri_mismatch_count >= 2) {
+                    ESP_LOGW(kTag, "Renderer was externally taken over before SetNext; leaving its playback untouched");
+                    break;
+                }
+            } else {
+                unexpected_uri_mismatch_count = 0;
+                if (stopping_.load() || !network_available_.load() || network_lost_.load() ||
+                    current.resource.utterance_generation != utterance_generation_.load()) {
+                    break;
+                }
+                next.next_action_attempted = true;
+                const bool next_action_response_ok = DlnaControl::SetNextUri(
+                    renderer_, next.uri, "EchoEar audio", kControlTimeoutMs);
+                // The SOAP call can block while Wi-Fi disconnects. Do not run
+                // any further state/fallback logic for this generation after
+                // it returns; the common cleanup below will stop and retire it.
+                if (stopping_.load() || !network_available_.load() || network_lost_.load() ||
+                    current.resource.utterance_generation != utterance_generation_.load()) {
+                    break;
+                }
+                // A timeout/error response is ambiguous: the renderer may have
+                // accepted SetNextAVTransportURI before the SOAP response was lost.
+                // Observe CurrentURI in either case before deciding to overwrite it.
+                next.next_action_maybe_accepted = true;
+                next.next_action_maybe_accepted_at = xTaskGetTickCount();
+                if (!next_action_response_ok) {
+                    ESP_LOGW(kTag,
+                             "SetNext response failed; checking renderer URI before sequential fallback");
+                }
+            }
+        }
+
         // SOAP state and media-info queries are not an atomic snapshot. Read
         // CurrentURI before the transport state, then confirm it again only
         // when the state suggests that the preloaded item has started. This
@@ -844,53 +892,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             }
         }
 
-        if (have_next && next.published && current.observed_playing && !next.next_action_attempted &&
-            renderer_.supports_set_next_av_transport_uri) {
-            // SetNextAVTransportURI changes the renderer's future playback
-            // target. Reconfirm that our item still owns AVTransport directly
-            // before issuing it; the periodic observer may be up to 3 seconds
-            // old and another controller could have taken over in that gap.
-            std::string active_uri;
-            if (!DlnaControl::GetCurrentUri(renderer_, active_uri, 1500)) {
-                ESP_LOGW(kTag, "Deferring SetNext: could not confirm active CurrentURI");
-            } else if (active_uri != current.uri) {
-                if (unexpected_uri_mismatch_count < 2) {
-                    ++unexpected_uri_mismatch_count;
-                }
-                ESP_LOGW(kTag,
-                         "Deferring SetNext because CurrentURI no longer matches active item (%u/2 confirmations)",
-                         static_cast<unsigned>(unexpected_uri_mismatch_count));
-                if (unexpected_uri_mismatch_count >= 2) {
-                    ESP_LOGW(kTag, "Renderer was externally taken over before SetNext; leaving its playback untouched");
-                    break;
-                }
-            } else {
-                unexpected_uri_mismatch_count = 0;
-                if (stopping_.load() || !network_available_.load() || network_lost_.load() ||
-                    current.resource.utterance_generation != utterance_generation_.load()) {
-                    break;
-                }
-                next.next_action_attempted = true;
-                const bool next_action_response_ok = DlnaControl::SetNextUri(
-                    renderer_, next.uri, "EchoEar audio", kControlTimeoutMs);
-                // The SOAP call can block while Wi-Fi disconnects. Do not run
-                // any further state/fallback logic for this generation after
-                // it returns; the common cleanup below will stop and retire it.
-                if (stopping_.load() || !network_available_.load() || network_lost_.load() ||
-                    current.resource.utterance_generation != utterance_generation_.load()) {
-                    break;
-                }
-                // A timeout/error response is ambiguous: the renderer may have
-                // accepted SetNextAVTransportURI before the SOAP response was lost.
-                // Observe CurrentURI in either case before deciding to overwrite it.
-                next.next_action_maybe_accepted = true;
-                next.next_action_maybe_accepted_at = xTaskGetTickCount();
-                if (!next_action_response_ok) {
-                    ESP_LOGW(kTag,
-                             "SetNext response failed; checking renderer URI before sequential fallback");
-                }
-            }
-        }
+
 
         const uint32_t elapsed_ms = static_cast<uint32_t>(
             (xTaskGetTickCount() - current.started) * portTICK_PERIOD_MS);
