@@ -8,10 +8,10 @@
 
 #include "esp_ae_rate_cvt.h"
 
-#include <freertos/semphr.h>
 #include <string>
 
 #include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
 
