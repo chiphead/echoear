@@ -713,6 +713,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
     bool fallback_uri_unconfirmed = false;
     uint8_t unexpected_uri_mismatch_count = 0;
     TickType_t next_position_info_poll = xTaskGetTickCount();
+    int last_current_transport_state = -1;
 
     while (!stopping_.load() && network_available_.load() &&
            !network_lost_.load() &&
@@ -829,6 +830,17 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
 
         DlnaTransportState transport = DlnaTransportState::kUnknown;
         const bool state_ok = DlnaControl::GetTransportState(renderer_, transport, 1500);
+        if (state_ok) {
+            const int state_value = static_cast<int>(transport);
+            if (state_value != last_current_transport_state) {
+                last_current_transport_state = state_value;
+                ESP_LOGI(kTag, "Current item transport state: %s",
+                         TransportStateName(transport));
+            }
+        } else if (last_current_transport_state != -2) {
+            last_current_transport_state = -2;
+            ESP_LOGW(kTag, "Current item transport state query failed");
+        }
         if (next_uri_matches_before_state && state_ok) {
             const int state_value = static_cast<int>(transport);
             if (state_value != next.last_logged_next_transport_state) {
@@ -855,7 +867,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         // a preloaded URI that Sony has already made current, including STOPPED
         // or TRANSITIONING windows.
         const TickType_t position_now = xTaskGetTickCount();
-        if ((current.observed_playing || next.next_uri_observed) &&
+        if ((!current.observed_playing || next.next_uri_observed) &&
             static_cast<int32_t>(position_now - next_position_info_poll) >= 0) {
             next_position_info_poll =
                 position_now + pdMS_TO_TICKS(2500);
