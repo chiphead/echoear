@@ -559,8 +559,8 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         bool observed_playing = false;
         bool published = false;
         bool next_action_attempted = false;
-        bool next_action_sent = false;
-        TickType_t next_action_sent_at = 0;
+        bool next_action_maybe_accepted = false;
+        TickType_t next_action_maybe_accepted_at = 0;
         bool next_uri_observed = false;
     };
 
@@ -719,7 +719,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         }
 
         bool next_is_current = false;
-        if (have_next && next.published && next.next_action_sent) {
+        if (have_next && next.published && next.next_action_maybe_accepted) {
             std::string renderer_uri;
             if (DlnaControl::GetCurrentUri(renderer_, renderer_uri, 1500)) {
                 const bool uri_matches_next = renderer_uri == next.uri;
@@ -746,12 +746,12 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         if (have_next && next.published && current.observed_playing && !next.next_action_attempted &&
             renderer_.supports_set_next_av_transport_uri) {
             next.next_action_attempted = true;
-            next.next_action_sent = DlnaControl::SetNextUri(
+            next.next_action_maybe_accepted = DlnaControl::SetNextUri(
                 renderer_, next.uri, "EchoEar audio", kControlTimeoutMs);
-            if (next.next_action_sent) {
-                next.next_action_sent_at = xTaskGetTickCount();
+            if (next.next_action_maybe_accepted) {
+                next.next_action_maybe_accepted_at = xTaskGetTickCount();
             }
-            if (!next.next_action_sent) {
+            if (!next.next_action_maybe_accepted) {
                 ESP_LOGW(kTag, "SetNext rejected; sequential fallback retained");
             }
         }
@@ -768,10 +768,10 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             transport == DlnaTransportState::kStopped;
         const bool stopped_after_play = renderer_stopped && current.observed_playing;
         const bool next_transition_pending = have_next && next.published &&
-            next.next_action_sent &&
+            next.next_action_maybe_accepted &&
             (next.next_uri_observed ||
              (state_ok && transport == DlnaTransportState::kTransitioning)) &&
-            (xTaskGetTickCount() - next.next_action_sent_at) < pdMS_TO_TICKS(10000);
+            (xTaskGetTickCount() - next.next_action_maybe_accepted_at) < pdMS_TO_TICKS(10000);
         if (duration_expired && !renderer_stopped && !next_transition_pending) {
             ESP_LOGW(kTag, "Playback watchdog expired without a confirmed STOPPED state; stopping renderer before fallback");
             if (!DlnaControl::Stop(renderer_, kControlTimeoutMs)) {
@@ -830,14 +830,14 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                 // transport-state query briefly reports STOPPED. Keep both
                 // resources alive and retry CurrentURI observation before
                 // forcing sequential playback, avoiding an accidental replay.
-                if (next.next_action_sent) {
+                if (next.next_action_maybe_accepted) {
                     const TickType_t now = xTaskGetTickCount();
                     const bool renderer_reports_transition =
                         state_ok && transport == DlnaTransportState::kTransitioning;
                     const bool next_transition_in_progress =
                         renderer_reports_transition || next.next_uri_observed;
                     if (next_transition_in_progress &&
-                        (now - next.next_action_sent_at) < pdMS_TO_TICKS(10000)) {
+                        (now - next.next_action_maybe_accepted_at) < pdMS_TO_TICKS(10000)) {
                         // Some renderers update CurrentURI before reporting
                         // PLAYING, or expose a TRANSITIONING/STOPPED interval.
                         // Do not overwrite that accepted next item with a
