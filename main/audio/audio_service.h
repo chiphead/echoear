@@ -87,6 +87,10 @@ struct AudioServiceCallbacks {
     // Fired when the decode/playback queues and their in-flight work are drained.
     std::function<void(void)> on_playback_drained;
     std::function<void(uint32_t playback_id, uint32_t media_position_ms)> on_playback_progress;
+    // Optional non-blocking PCM sink. Return true when the frame was handled;
+    // return false to use the default local codec output. Implementations must
+    // enqueue/copy quickly and must never perform network I/O in this callback.
+    std::function<bool(const std::vector<int16_t>& pcm, int sample_rate)> on_pcm_output;
 };
 
 enum AudioTaskType {
