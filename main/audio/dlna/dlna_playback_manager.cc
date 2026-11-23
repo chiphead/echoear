@@ -673,7 +673,8 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
     }
     const int64_t control_started_us = esp_timer_get_time();
     const bool start_accepted = DlnaControl::SetUriAndPlay(
-        renderer_, current.uri, "EchoEar audio", kControlTimeoutMs);
+        renderer_, current.uri, "EchoEar audio", current.duration_ms,
+        kControlTimeoutMs);
     const int64_t control_finished_us = esp_timer_get_time();
     ESP_LOGI(kTag, "Timing SetUriAndPlay: control=%lldms pcm_to_play_response=%lldms",
              static_cast<long long>((control_finished_us - control_started_us) / 1000),
@@ -783,7 +784,8 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                 }
                 next.next_action_attempted = true;
                 const bool next_action_response_ok = DlnaControl::SetNextUri(
-                    renderer_, next.uri, "EchoEar audio", kControlTimeoutMs);
+                    renderer_, next.uri, "EchoEar audio", next.duration_ms,
+                    kControlTimeoutMs);
                 // The SOAP call can block while Wi-Fi disconnects. Do not run
                 // any further state/fallback logic for this generation after
                 // it returns; the common cleanup below will stop and retire it.
@@ -1105,7 +1107,8 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                     break;
                 }
                 if (DlnaControl::SetUriAndPlay(renderer_, next.uri,
-                                               "EchoEar audio", kControlTimeoutMs)) {
+                                               "EchoEar audio", next.duration_ms,
+                                               kControlTimeoutMs)) {
                     resource_registry_.Retire(current.path);
                     current = std::move(next);
                     next = Item{};
