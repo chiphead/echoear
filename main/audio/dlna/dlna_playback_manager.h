@@ -48,6 +48,7 @@ private:
     DlnaPcmBuffer buffers_[kBufferCount];
     bool buffer_ready_[kBufferCount] = {false, false};
     bool buffer_active_[kBufferCount] = {false, false};
+    bool buffer_dropping_[kBufferCount] = {false, false};
     uint8_t write_buffer_index_ = 0;
     std::mutex buffer_mutex_;
 
