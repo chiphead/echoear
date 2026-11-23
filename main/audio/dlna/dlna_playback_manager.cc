@@ -700,9 +700,13 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         const bool renderer_stopped = state_ok &&
             transport == DlnaTransportState::kStopped;
         const bool stopped_after_play = renderer_stopped && current.observed_playing;
-        if (duration_expired && !renderer_stopped &&
-            (!have_next || !next.published)) {
-            ESP_LOGW(kTag, "Playback watchdog expired without a confirmed STOPPED state; stopping renderer");
+        const bool next_transition_pending = have_next && next.published &&
+            next.next_action_sent &&
+            (next.next_uri_observed ||
+             (state_ok && transport == DlnaTransportState::kTransitioning)) &&
+            (xTaskGetTickCount() - next.next_action_sent_at) < pdMS_TO_TICKS(10000);
+        if (duration_expired && !renderer_stopped && !next_transition_pending) {
+            ESP_LOGW(kTag, "Playback watchdog expired without a confirmed STOPPED state; stopping renderer before fallback");
             if (!DlnaControl::Stop(renderer_, kControlTimeoutMs)) {
                 renderer_ready_ = false;
                 sink_ready_.store(false);
