@@ -313,7 +313,10 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         }
     }
 
-    if (buffer_dropping_[index]) return true;
+    if (buffer_dropping_[index]) {
+        utterance_dropping_ = true;
+        return true;
+    }
     if (!buffer_active_[index]) {
         if (!buffers_[index].Begin(sample_rate, channels)) {
             callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
@@ -467,7 +470,6 @@ void DlnaPlaybackManager::FinalizePendingUtteranceLocked() {
 
     const uint8_t index = write_buffer_index_;
     if (utterance_dropping_ || buffer_dropping_[index]) {
-        if (buffer_ready_[index]) buffers_[index].Reset();
         if (buffer_ready_[index]) buffers_[index].Reset();
         buffer_active_[index] = false;
         buffer_dropping_[index] = false;
