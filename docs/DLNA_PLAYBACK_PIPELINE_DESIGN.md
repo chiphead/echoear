@@ -249,3 +249,10 @@ AVTransport SOAP escaping and response extraction now share the header-only `dln
 - The checks are intentionally adjacent to the SOAP mutation rather than relying only on the outer worker loop condition. SOAP calls remain blocking, so a disconnect can still arrive while a request is in flight; the generation-aware loop exit then performs the existing Stop-and-retire recovery.
 - Sequential fallback's CurrentURI-query timeout now uses an explicit initialized flag instead of treating tick value zero as an uninitialized sentinel. This keeps the 10-second bound correct even if the FreeRTOS tick counter happens to be zero at the first failed query.
 - These are static code-path protections. They do not replace a full ESP-IDF build or disconnect/reconnect testing against the SRS-X88.
+
+## Abort stale generation immediately after SetNext
+
+- `SetNextAVTransportURI` is a blocking SOAP operation. A network disconnect may invalidate the active utterance while the request is in flight.
+- Immediately after the SOAP call returns, the worker now rechecks stop/network/generation state and exits the current processing loop before transport polling or sequential fallback can issue another AVTransport mutation for the stale generation.
+- The common exit cleanup remains responsible for stopping EchoEar playback and retiring current/next resources. Published resources remain protected by HTTP leases; unpublished look-ahead WAV data remains owned by the worker and is freed there.
+- This narrows the stale-session window but cannot cancel a SOAP request already sent to the renderer. A complete build and real disconnect/reconnect exercise remain outstanding.
