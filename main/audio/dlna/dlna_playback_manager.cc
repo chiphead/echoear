@@ -778,6 +778,13 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         const uint32_t playback_watchdog_ms = std::min<uint32_t>(
             current.duration_ms + 15000, 180000);
         const bool duration_expired = elapsed_ms >= playback_watchdog_ms;
+        // A successful SOAP Play response does not guarantee that the renderer
+        // actually entered PLAYING. Bound this startup phase independently of
+        // the media duration so a long WAV cannot leave the worker waiting for
+        // most of its full duration when playback never starts.
+        constexpr uint32_t kPlaybackStartupTimeoutMs = 12000;
+        const bool startup_expired =
+            !current.observed_playing && elapsed_ms >= kPlaybackStartupTimeoutMs;
         const bool renderer_stopped = state_ok &&
             transport == DlnaTransportState::kStopped;
         // NO_MEDIA_PRESENT is not equivalent to STOPPED. Some renderers use it
@@ -801,8 +808,15 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             (next.next_uri_observed ||
              (state_ok && transport == DlnaTransportState::kTransitioning)) &&
             (xTaskGetTickCount() - next.next_action_maybe_accepted_at) < pdMS_TO_TICKS(10000);
-        if (duration_expired && !renderer_stopped && !next_transition_pending) {
-            ESP_LOGW(kTag, "Playback watchdog expired without a confirmed STOPPED state; stopping renderer before fallback");
+        if ((duration_expired || startup_expired) && !next_transition_pending &&
+            (!renderer_stopped || startup_expired)) {
+            if (startup_expired) {
+                ESP_LOGW(kTag,
+                         "Renderer did not report PLAYING within %u ms; stopping before resource retirement",
+                         static_cast<unsigned>(kPlaybackStartupTimeoutMs));
+            } else {
+                ESP_LOGW(kTag, "Playback watchdog expired without a confirmed STOPPED state; stopping renderer before fallback");
+            }
             if (!DlnaControl::Stop(renderer_, kControlTimeoutMs)) {
                 renderer_ready_ = false;
                 sink_ready_.store(false);
@@ -830,7 +844,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             }
         }
 
-        if (stopped_after_play || duration_expired) {
+        if (stopped_after_play || duration_expired || startup_expired) {
             if (have_next && !next.published) {
                 // Do not wait forever with the completed current item occupying
                 // a registry slot. Once playback is stopped, retire it and give
