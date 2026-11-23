@@ -769,12 +769,14 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         const bool next_transition_observation_active =
             have_next && next.published && next.next_action_maybe_accepted;
         if (current.observed_playing && renderer_holds_active_item &&
-            !next_transition_observation_active &&
             static_cast<int32_t>(uri_poll_now - next_current_uri_poll) >= 0) {
             next_current_uri_poll = uri_poll_now + pdMS_TO_TICKS(3000);
             std::string renderer_uri;
             if (DlnaControl::GetCurrentUri(renderer_, renderer_uri, 1500)) {
-                if (renderer_uri == current.uri) {
+                const bool uri_is_expected =
+                    renderer_uri == current.uri ||
+                    (next_transition_observation_active && renderer_uri == next.uri);
+                if (uri_is_expected) {
                     unexpected_uri_mismatch_count = 0;
                 } else {
                     if (unexpected_uri_mismatch_count < 2) {
