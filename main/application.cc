@@ -15,7 +15,7 @@
 #include <driver/gpio.h>
 #include <esp_log.h>
 #if CONFIG_DLNA_AUDIO_OUTPUT
-#include <esp_netif.h>
+#include <wifi_manager.h>
 #endif
 #include <arpa/inet.h>
 #include <cJSON.h>
@@ -303,12 +303,8 @@ void Application::Run() {
 void Application::HandleNetworkConnectedEvent() {
     ESP_LOGI(TAG, "Network connected");
 #if CONFIG_DLNA_AUDIO_OUTPUT
-    esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    esp_netif_ip_info_t ip_info{};
-    char host_ipv4[16] = {};
-    if (netif != nullptr && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK &&
-        ip_info.ip.addr != 0 && inet_ntop(AF_INET, &ip_info.ip, host_ipv4,
-                                         sizeof(host_ipv4)) != nullptr) {
+    const std::string host_ipv4 = WifiManager::GetInstance().GetIpAddress();
+    if (!host_ipv4.empty() && host_ipv4 != "0.0.0.0") {
         if (!dlna_playback_manager_.Start(host_ipv4)) {
             ESP_LOGE(TAG, "Failed to start DLNA audio output manager");
         }
