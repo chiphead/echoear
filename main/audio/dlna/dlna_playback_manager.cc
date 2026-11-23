@@ -140,12 +140,81 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         }
         buffer_active_[index] = true;
     }
-    if (!buffers_[index].Append(samples, sample_count)) {
-        // Do not fall back mid-utterance: that would play only its tail locally
-        // after earlier frames had already been consumed by the DLNA sink.
-        buffer_dropping_[index] = true;
-        ESP_LOGE(kTag, "Dropping oversized/invalid utterance instead of splitting output");
-        return true;
+    size_t offset = 0;
+    while (offset < sample_count) {
+        const size_t remaining_samples =
+            buffers_[index].GetRemainingPcmBytes() / sizeof(int16_t);
+        const size_t frame_samples = static_cast<size_t>(channels);
+        const size_t aligned_remaining =
+            (remaining_samples / frame_samples) * frame_samples;
+
+        if (aligned_remaining == 0) {
+            if (!QueueSegmentLocked(index)) {
+                buffer_dropping_[index] = true;
+                ESP_LOGE(kTag, "DLNA segment queue/buffer unavailable; dropping utterance tail");
+                return true;
+            }
+            const uint8_t other = static_cast<uint8_t>((index + 1) % kBufferCount);
+            if (!buffer_ready_[other]) {
+                buffer_dropping_[index] = true;
+                ESP_LOGE(kTag, "No free PCM buffer for next DLNA segment; dropping utterance tail");
+                return true;
+            }
+            index = other;
+            write_buffer_index_ = index;
+            if (!buffers_[index].Begin(sample_rate, channels)) {
+                buffer_dropping_[index] = true;
+                return true;
+            }
+            buffer_active_[index] = true;
+            continue;
+        }
+
+        const size_t chunk_samples = std::min(sample_count - offset, aligned_remaining);
+        if (!buffers_[index].Append(samples + offset, chunk_samples)) {
+            buffer_dropping_[index] = true;
+            ESP_LOGE(kTag, "Invalid PCM frame while splitting DLNA segment");
+            return true;
+        }
+        offset += chunk_samples;
+
+        if (offset < sample_count) {
+            if (!QueueSegmentLocked(index)) {
+                buffer_dropping_[index] = true;
+                ESP_LOGE(kTag, "Could not queue completed DLNA segment");
+                return true;
+            }
+            const uint8_t other = static_cast<uint8_t>((index + 1) % kBufferCount);
+            if (!buffer_ready_[other]) {
+                buffer_dropping_[index] = true;
+                ESP_LOGE(kTag, "No free PCM buffer for next DLNA segment; dropping utterance tail");
+                return true;
+            }
+            index = other;
+            write_buffer_index_ = index;
+            if (!buffers_[index].Begin(sample_rate, channels)) {
+                buffer_dropping_[index] = true;
+                return true;
+            }
+            buffer_active_[index] = true;
+        }
+    }
+    return true;
+}
+
+
+bool DlnaPlaybackManager::QueueSegmentLocked(uint8_t index) {
+    if (index >= kBufferCount || !buffer_ready_[index] || !buffer_active_[index]) return false;
+    Resource resource{};
+    if (!buffers_[index].FinalizeWav(&resource.wav_data, &resource.wav_size)) return false;
+    resource.buffer_index = index;
+    buffer_ready_[index] = false;
+    buffer_active_[index] = false;
+    if (xQueueSend(resource_queue_, &resource, 0) != pdTRUE) {
+        heap_caps_free(resource.wav_data);
+        recycle_mask_.fetch_or(1u << index);
+        ESP_LOGW(kTag, "DLNA segment queue full; dropping this segment");
+        return false;
     }
     return true;
 }
@@ -171,36 +240,21 @@ void DlnaPlaybackManager::EndUtterance() {
             return;
         }
         if (buffer_dropping_[index]) {
-            buffers_[index].Reset();
+            if (buffer_ready_[index]) buffers_[index].Reset();
             buffer_active_[index] = false;
             buffer_dropping_[index] = false;
             utterance_decided_ = false;
-            ESP_LOGW(kTag, "Discarded utterance that exceeded the PCM limit");
+            fallback_utterance_ = false;
+            ESP_LOGW(kTag, "Dropped the remainder of an utterance after DLNA segment capacity was exhausted");
             return;
         }
-        if (!buffer_active_[index] || !buffer_ready_[index]) return;
-
-        if (!buffers_[index].FinalizeWav(&resource.wav_data, &resource.wav_size)) {
-            buffers_[index].Reset();
-            buffer_active_[index] = false;
-            utterance_decided_ = false;
-            ESP_LOGW(kTag, "No complete PCM utterance to publish");
-            return;
+        if (buffer_active_[index] && buffer_ready_[index]) {
+            QueueSegmentLocked(index);
         }
-
-        resource.buffer_index = index;
         utterance_decided_ = false;
-        buffer_ready_[index] = false;
-        buffer_active_[index] = false;
-
+        fallback_utterance_ = false;
         const uint8_t other = static_cast<uint8_t>((index + 1) % kBufferCount);
-        if (buffer_ready_[other]) {
-            write_buffer_index_ = other;
-        } else {
-            // Keep the completed resource; subsequent frames fall back to the
-            // local codec until the worker recycles a buffer.
-            ESP_LOGW(kTag, "Both PCM buffers are busy; next frames use local output");
-        }
+        if (buffer_ready_[other]) write_buffer_index_ = other;
     }
 
     if (xQueueSend(resource_queue_, &resource, 0) != pdTRUE) {
