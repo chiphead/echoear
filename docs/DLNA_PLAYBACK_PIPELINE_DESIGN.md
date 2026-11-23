@@ -210,3 +210,11 @@ AVTransport SOAP escaping and response extraction now share the header-only `dln
 - On initial or sequential-fallback start failure, the worker now issues `Stop` before retiring either published resource. A successful Stop permits normal retirement while any active HTTP lease drains.
 - If recovery Stop also fails, the worker marks the network session lost and leaves published resources registered. The outer worker path first stops HTTPD, then retires the registry, preventing a late renderer GET from racing with premature WAV release.
 - This is a conservative recovery path; actual Sony X88 behavior after SOAP timeouts still requires device testing.
+
+
+## AVTransport STOPPED versus NO_MEDIA_PRESENT
+
+- The SOAP parser preserves `STOPPED` and `NO_MEDIA_PRESENT` as distinct transport states; the latter is not treated as an ordinary STOPPED sample.
+- When the renderer reports `NO_MEDIA_PRESENT`, playback completion is accepted only after a separate `GetMediaInfo` confirms an empty `CurrentURI`. A failed query or a still-populated URI remains ambiguous and keeps the WAV resource alive for the normal watchdog/Stop recovery path.
+- `CurrentURI` extraction explicitly permits a valid empty element for this check, while the default XML helper behavior continues to reject empty values for callers that require non-empty content.
+- This avoids premature resource retirement based on a transport state that does not, by itself, establish that the currently published item has finished. Sony SRS-X88 behavior still requires physical-device validation.
