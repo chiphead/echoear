@@ -52,7 +52,7 @@ inline std::string Unescape(std::string value) {
 }
 
 inline bool ExtractValue(const std::string& xml, const char* tag,
-                         std::string& value) {
+                         std::string& value, bool allow_empty = false) {
     if (tag == nullptr || *tag == '\0') return false;
     const std::string wanted(tag);
     size_t pos = 0;
@@ -79,7 +79,7 @@ inline bool ExtractValue(const std::string& xml, const char* tag,
         const size_t close_pos = xml.find(close, open_end + 1);
         if (close_pos == std::string::npos) return false;
         value = Unescape(xml.substr(open_end + 1, close_pos - open_end - 1));
-        return !value.empty();
+        return allow_empty || !value.empty();
     }
     return false;
 }
