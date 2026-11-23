@@ -711,6 +711,23 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         if (xTaskGetTickCount() < next_poll) continue;
         next_poll = xTaskGetTickCount() + pdMS_TO_TICKS(650);
 
+        // SOAP state and media-info queries are not an atomic snapshot. Read
+        // CurrentURI before the transport state, then confirm it again only
+        // when the state suggests that the preloaded item has started. This
+        // brackets the state sample and avoids combining an old STOPPED/PLAYING
+        // response with a URI observed after a renderer transition.
+        bool next_uri_matches_before_state = false;
+        if (have_next && next.published && next.next_action_maybe_accepted) {
+            std::string renderer_uri;
+            if (DlnaControl::GetCurrentUri(renderer_, renderer_uri, 1500)) {
+                next_uri_matches_before_state = renderer_uri == next.uri;
+                if (next_uri_matches_before_state && !next.next_uri_observed) {
+                    next.next_uri_observed = true;
+                    ESP_LOGI(kTag, "Renderer CurrentURI now references preloaded item; waiting for playback state");
+                }
+            }
+        }
+
         DlnaTransportState transport = DlnaTransportState::kUnknown;
         const bool state_ok = DlnaControl::GetTransportState(renderer_, transport, 1500);
         if (state_ok && transport == DlnaTransportState::kPlaying) {
@@ -719,17 +736,11 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         }
 
         bool next_is_current = false;
-        if (have_next && next.published && next.next_action_maybe_accepted) {
-            std::string renderer_uri;
-            if (DlnaControl::GetCurrentUri(renderer_, renderer_uri, 1500)) {
-                const bool uri_matches_next = renderer_uri == next.uri;
-                if (uri_matches_next && !next.next_uri_observed) {
-                    next.next_uri_observed = true;
-                    ESP_LOGI(kTag, "Renderer CurrentURI now references preloaded item; waiting for playback state");
-                }
-                next_is_current = uri_matches_next && state_ok &&
-                                  transport == DlnaTransportState::kPlaying;
-            }
+        if (next_uri_matches_before_state && state_ok &&
+            transport == DlnaTransportState::kPlaying) {
+            std::string confirmed_uri;
+            next_is_current = DlnaControl::GetCurrentUri(renderer_, confirmed_uri, 1500) &&
+                              confirmed_uri == next.uri;
         }
         if (next_is_current) {
             ESP_LOGI(kTag, "Renderer transitioned to preloaded item");
