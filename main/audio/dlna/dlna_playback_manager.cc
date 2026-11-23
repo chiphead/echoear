@@ -126,8 +126,13 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         }
     }
 
-    const uint8_t index = write_buffer_index_;
+    uint8_t index = write_buffer_index_;
     if (!buffer_ready_[index]) {
+        if (utterance_decided_ && !fallback_utterance_) {
+            buffer_dropping_[index] = true;
+            ESP_LOGW(kTag, "No free PCM buffer; dropping remaining frames of current DLNA utterance");
+            return true;
+        }
         fallback_utterance_ = true;
         return false;
     }
@@ -220,7 +225,6 @@ bool DlnaPlaybackManager::QueueSegmentLocked(uint8_t index) {
 }
 
 void DlnaPlaybackManager::EndUtterance() {
-    Resource resource{};
     {
         std::lock_guard<std::mutex> lock(buffer_mutex_);
         const uint8_t index = write_buffer_index_;
@@ -257,14 +261,6 @@ void DlnaPlaybackManager::EndUtterance() {
         if (buffer_ready_[other]) write_buffer_index_ = other;
     }
 
-    if (xQueueSend(resource_queue_, &resource, 0) != pdTRUE) {
-        ESP_LOGW(kTag, "DLNA resource queue full; dropping completed utterance");
-        heap_caps_free(resource.wav_data);
-        // Queue saturation must not permanently strand this buffer. The
-        // worker polls this bitmask independently of the resource queue.
-        recycle_mask_.fetch_or(1u << resource.buffer_index);
-
-    }
 }
 
 void DlnaPlaybackManager::AbortUtterance() {
