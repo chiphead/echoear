@@ -681,8 +681,15 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                 renderer_ready_ = false;
                 sink_ready_.store(false);
                 media_server_.Stop();
-                resource_registry_.RetireAll();
-                ESP_LOGE(kTag, "Renderer Stop failed; media server retired to protect WAV ownership");
+                if (!media_server_.IsRunning()) {
+                    resource_registry_.RetireAll();
+                } else {
+                    // Keep the worker and registry alive while HTTPD may still
+                    // hold request user_ctx/leases. Worker cleanup retries Stop.
+                    network_available_.store(false);
+                    network_lost_.store(true);
+                }
+                ESP_LOGE(kTag, "Renderer Stop failed; media server shutdown requested before WAV retirement");
                 return;
             }
         }
@@ -789,6 +796,13 @@ void DlnaPlaybackManager::Worker() {
                 if (renderer_ready_) DlnaControl::Stop(renderer_, kControlTimeoutMs);
                 media_server_.Stop();
             }
+            if (media_server_.IsRunning()) {
+                // A failed httpd_stop() means handlers may still reference
+                // this manager's registry. Retry without retiring/destroying it.
+                network_lost_.store(true);
+                vTaskDelay(pdMS_TO_TICKS(500));
+                continue;
+            }
             resource_registry_.RetireAll();
             renderer_ready_ = false;
             next_discovery = 0;
@@ -836,6 +850,13 @@ void DlnaPlaybackManager::Worker() {
     sink_ready_.store(false);
     if (media_server_.IsRunning()) {
         if (renderer_ready_) DlnaControl::Stop(renderer_, kControlTimeoutMs);
+        media_server_.Stop();
+    }
+    // The destructor waits for this worker. Do not signal completion while
+    // HTTPD can still call handlers whose user_ctx points into this object.
+    while (media_server_.IsRunning()) {
+        ESP_LOGE(kTag, "HTTP server is still active; retrying shutdown before registry destruction");
+        vTaskDelay(pdMS_TO_TICKS(500));
         media_server_.Stop();
     }
     resource_registry_.RetireAll();
