@@ -53,6 +53,7 @@ private:
     void ProcessResource(const Resource& resource);
     void WaitForPlaybackCompletion(size_t wav_size, uint32_t utterance_generation);
     bool QueueSegmentLocked(uint8_t index);
+    int FindReadyBufferLocked(uint8_t after_index) const;
     bool InitializeResampler(int source_sample_rate, int channels);
 
     // Three accumulators provide two queued look-ahead segments while the worker
