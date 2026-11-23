@@ -149,7 +149,7 @@ bool DlnaPlaybackManager::InitializeResampler(int source_sample_rate, int channe
                                kMaxAudioFrameDurationMs) / 1000);
     uint32_t max_output_frames = 0;
     if (esp_ae_rate_cvt_get_max_out_sample_num(resampler_, max_input_frames,
-                                               &max_output_frames) != ESP_OK ||
+                                               &max_output_frames) != ESP_AE_ERR_OK ||
         max_output_frames == 0) {
         esp_ae_rate_cvt_close(resampler_);
         resampler_ = nullptr;
@@ -210,7 +210,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         const auto convert_ret = esp_ae_rate_cvt_process(
             resampler_, (esp_ae_sample_t*)samples, input_frames,
             (esp_ae_sample_t*)resampled_pcm_.data(), &actual_output_frames);
-        if (convert_ret != ESP_OK || actual_output_frames == 0) {
+        if (convert_ret != ESP_AE_ERR_OK || actual_output_frames == 0) {
             fallback_utterance_ = true;
             ESP_LOGW(kTag, "PCM resampling failed (%d); using local output", convert_ret);
             return false;
