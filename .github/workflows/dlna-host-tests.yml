@@ -1,0 +1,24 @@
+name: DLNA Host Tests
+
+on:
+  push:
+    branches:
+      - feature/dlna-sony-x88-audio
+  pull_request:
+    branches:
+      - main
+      - feature/dlna-sony-x88-audio
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resource-registry:
+    name: Resource registry ownership tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Compile and run host tests
+        run: python3 scripts/tests/test_dlna_resource_registry.py
