@@ -190,4 +190,13 @@ AVTransport SOAP escaping and response extraction now share the header-only `dln
 - `AudioService` queue-drained callbacks indicate that the local decode/playback queues are momentarily empty, not necessarily that the server has ended the audio stream. DLNA uses a 200 ms silence grace window before finalizing a partial WAV. A new PCM frame inside that window cancels pending finalization and continues the same segment, preserving resampler state. Only a gap lasting at least 200 ms closes the current tail. This prevents normal inter-packet gaps from turning every 60 ms Opus frame into a separate WAV/AVTransport item.
 - A stalled-playback watchdog now sends Stop before sequential fallback unless a recently accepted next-item transition has already been observed. This prevents a timed-out current item from being overwritten while it may still be playing, while preserving the bounded transition grace period.
 
-- Host regression coverage for `DlnaPcmBuffer` verifies PCM payload preservation, WAV header fields, the 256 KiB default capacity, and rejection of an over-capacity append. The `DLNA Host Tests` workflow runs registry, XML, and PCM-buffer tests. Push/PR runs are path-filtered to DLNA source, DLNA tests, build configuration, and the workflow; ordinary documentation-only commits do not trigger the workflow.
+- Host regression coverage for `DlnaPcmBuffer` verifies PCM payload preservation, WAV header fields, the 256 KiB default capacity, and rejection of an over-capacity append. The `DLNA Host Tests` workflow runs registry, XML, and PCM-buffer tests. The workflow is limited to pull requests that change DLNA source, DLNA tests, build configuration, or the workflow itself, plus manual dispatch; ordinary feature-branch pushes do not trigger it.
+
+
+## HTTP slow-client isolation
+
+- ESP-IDF 6.1's HTTP server runs ordinary URI handlers on its server task. A synchronous media response therefore blocks later GET/HEAD requests while the current socket send is stalled.
+- Both media-server startup paths now set a 2-second receive timeout, a 1-second socket send timeout, and enable LRU session purging.
+- Media responses are emitted in bounded 4 KiB writes with a 5-second overall response deadline. A timed-out or disconnected client causes the handler to return failure, allowing HTTPD to close that session and the registry lease guard to release its reference.
+- HTTP telemetry records the actual WAV body bytes accepted by httpd_send(), including partial transfers that later time out. HEAD responses correctly report zero body bytes.
+- This is a defensive bound, not evidence of the X88's actual request cadence or throughput. A full ESP-IDF build and physical slow-client/X88 test remain outstanding.
