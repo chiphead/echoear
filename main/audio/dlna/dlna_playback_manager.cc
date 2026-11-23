@@ -666,6 +666,8 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
     bool have_next = false;
     TickType_t next_poll = xTaskGetTickCount();
     TickType_t stopped_since = 0;
+    TickType_t next_current_uri_poll = xTaskGetTickCount();
+    uint8_t unexpected_uri_mismatch_count = 0;
 
     while (!stopping_.load() && network_available_.load() &&
            !network_lost_.load() &&
@@ -751,7 +753,51 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             current.started = xTaskGetTickCount();
             current.observed_playing = state_ok && transport == DlnaTransportState::kPlaying;
             stopped_since = 0;
+            unexpected_uri_mismatch_count = 0;
+            next_current_uri_poll = xTaskGetTickCount() + pdMS_TO_TICKS(3000);
             continue;
+        }
+
+        // Detect an external controller replacing the URI while our item is
+        // actively playing or paused. Do not poll on every transport sample:
+        // GetMediaInfo is a separate SOAP round-trip and can be relatively
+        // expensive on a small renderer.
+        const TickType_t uri_poll_now = xTaskGetTickCount();
+        const bool renderer_holds_active_item =
+            state_ok && (transport == DlnaTransportState::kPlaying ||
+                         transport == DlnaTransportState::kPaused);
+        const bool next_transition_observation_active =
+            have_next && next.published && next.next_action_maybe_accepted;
+        if (current.observed_playing && renderer_holds_active_item &&
+            !next_transition_observation_active &&
+            static_cast<int32_t>(uri_poll_now - next_current_uri_poll) >= 0) {
+            next_current_uri_poll = uri_poll_now + pdMS_TO_TICKS(3000);
+            std::string renderer_uri;
+            if (DlnaControl::GetCurrentUri(renderer_, renderer_uri, 1500)) {
+                if (renderer_uri == current.uri) {
+                    unexpected_uri_mismatch_count = 0;
+                } else {
+                    if (unexpected_uri_mismatch_count < 2) {
+                        ++unexpected_uri_mismatch_count;
+                    }
+                    ESP_LOGW(kTag,
+                             "Renderer CurrentURI differs from active item (%u/2 confirmations)",
+                             static_cast<unsigned>(unexpected_uri_mismatch_count));
+                    if (unexpected_uri_mismatch_count >= 2) {
+                        // Another controller has taken over AVTransport. Do
+                        // not send Stop: that would interrupt the external
+                        // content. Retire our URLs; registry leases keep any
+                        // in-flight HTTP response alive until its handler exits.
+                        ESP_LOGW(kTag,
+                                 "Renderer playback was externally replaced; retiring EchoEar resources without stopping renderer");
+                        break;
+                    }
+                }
+            } else {
+                // A failed SOAP query is not evidence of takeover and breaks
+                // the consecutive-success confirmation sequence.
+                unexpected_uri_mismatch_count = 0;
+            }
         }
 
         if (have_next && next.published && current.observed_playing && !next.next_action_attempted &&
