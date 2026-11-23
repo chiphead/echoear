@@ -548,21 +548,9 @@ void DlnaPlaybackManager::ProcessResource(const Resource& resource) {
         ESP_LOGI(kTag, "Skipping queued segment from an aborted utterance");
         return;
     }
-
     if (!renderer_ready_) {
         heap_caps_free(resource.wav_data);
         return;
-    }
-
-    // A previous resource may still be fetched by the renderer. Stop it and
-    // shut down its HTTP endpoint before releasing or replacing its WAV bytes.
-    if (media_server_.IsRunning()) {
-        DlnaControl::Stop(renderer_, kControlTimeoutMs);
-        media_server_.Stop();
-    }
-    if (current_wav_ != nullptr) {
-        heap_caps_free(current_wav_);
-        current_wav_ = nullptr;
     }
 
     std::string host;
@@ -570,19 +558,40 @@ void DlnaPlaybackManager::ProcessResource(const Resource& resource) {
         std::lock_guard<std::mutex> lock(state_mutex_);
         host = host_ipv4_;
     }
-    if (!media_server_.Start(host, resource.wav_data, resource.wav_size)) {
+
+    // One HTTP server stays alive for the renderer session. Every segment has
+    // a unique immutable URL and registry-managed lifetime.
+    if (!media_server_.IsRunning() &&
+        !media_server_.Start(host, resource_registry_)) {
         heap_caps_free(resource.wav_data);
-        ESP_LOGE(kTag, "Could not publish WAV resource");
+        ESP_LOGE(kTag, "Could not start registry-backed media server");
         renderer_ready_ = false;
         sink_ready_.store(false);
         return;
     }
 
-    if (!DlnaControl::SetUriAndPlay(renderer_, media_server_.GetMediaUri(),
+    const uint32_t sequence = ++resource_sequence_;
+    std::string resource_path;
+    if (!resource_registry_.Publish(resource.utterance_generation, sequence,
+                                    resource.wav_data, resource.wav_size,
+                                    resource_path)) {
+        heap_caps_free(resource.wav_data);
+        ESP_LOGE(kTag, "Could not publish WAV resource into registry");
+        return;
+    }
+
+    const std::string media_uri = media_server_.GetMediaUri() +
+                                  std::to_string(resource.utterance_generation) +
+                                  "/" + std::to_string(sequence) + ".wav";
+    current_wav_ = resource.wav_data;  // Non-owning; registry owns until Retire().
+    ESP_LOGI(kTag, "Published immutable DLNA resource %s (%u bytes)",
+             media_uri.c_str(), static_cast<unsigned>(resource.wav_size));
+
+    if (!DlnaControl::SetUriAndPlay(renderer_, media_uri,
                                     "EchoEar audio", kControlTimeoutMs)) {
         ESP_LOGE(kTag, "Renderer rejected SetAVTransportURI/Play");
-        media_server_.Stop();
-        heap_caps_free(resource.wav_data);
+        resource_registry_.Retire(resource_path);
+        current_wav_ = nullptr;
         renderer_ready_ = false;
         sink_ready_.store(false);
         return;
@@ -590,32 +599,20 @@ void DlnaPlaybackManager::ProcessResource(const Resource& resource) {
 
     if (resource.utterance_generation != utterance_generation_.load()) {
         DlnaControl::Stop(renderer_, kControlTimeoutMs);
-        media_server_.Stop();
-        heap_caps_free(resource.wav_data);
+        resource_registry_.Retire(resource_path);
+        current_wav_ = nullptr;
         return;
     }
 
-    // Keep this allocation immutable and alive while the renderer may issue
-    // GET/Range requests. It is released only when playback completes or aborts.
-    current_wav_ = resource.wav_data;
-    ESP_LOGI(kTag, "DLNA playback command accepted (%u bytes)",
-             static_cast<unsigned>(resource.wav_size));
-
-    // Keep the HTTP resource alive until AVTransport reports STOPPED, or a
-    // duration-based safety deadline expires when the renderer lacks state support.
     WaitForPlaybackCompletion(resource.wav_size, resource.utterance_generation);
-
     if (resource.utterance_generation != utterance_generation_.load() ||
         network_lost_.load() || !network_available_.load()) {
-        // Best effort even during Wi-Fi loss: do not leave the renderer
-        // pointed at a resource that is about to be unpublished.
         DlnaControl::Stop(renderer_, kControlTimeoutMs);
     }
-    if (media_server_.IsRunning()) media_server_.Stop();
-    if (current_wav_ != nullptr) {
-        heap_caps_free(current_wav_);
-        current_wav_ = nullptr;
-    }
+
+    // Retire prevents new requests immediately; active HTTP leases defer free.
+    resource_registry_.Retire(resource_path);
+    current_wav_ = nullptr;
 }
 
 void DlnaPlaybackManager::Worker() {
@@ -648,10 +645,8 @@ void DlnaPlaybackManager::Worker() {
                 if (renderer_ready_) DlnaControl::Stop(renderer_, kControlTimeoutMs);
                 media_server_.Stop();
             }
-            if (current_wav_ != nullptr) {
-                heap_caps_free(current_wav_);
-                current_wav_ = nullptr;
-            }
+            resource_registry_.RetireAll();
+            current_wav_ = nullptr;
             renderer_ready_ = false;
             next_discovery = 0;
             ESP_LOGI(kTag, "Network loss/reconnect: released active DLNA resource");
@@ -700,9 +695,7 @@ void DlnaPlaybackManager::Worker() {
         if (renderer_ready_) DlnaControl::Stop(renderer_, kControlTimeoutMs);
         media_server_.Stop();
     }
-    if (current_wav_ != nullptr) {
-        heap_caps_free(current_wav_);
-        current_wav_ = nullptr;
-    }
+    resource_registry_.RetireAll();
+    current_wav_ = nullptr;
     renderer_ready_ = false;
 }
