@@ -29,15 +29,21 @@ bool IsSonyX88(const DlnaRenderer& renderer) {
 }  // namespace
 
 DlnaPlaybackManager::~DlnaPlaybackManager() {
-    // The manager is owned by Application for the lifetime of the firmware.
-    // Avoid deleting a live FreeRTOS worker from an arbitrary destructor context.
-    if (resource_queue_ != nullptr) {
-        vQueueDelete(resource_queue_);
-        resource_queue_ = nullptr;
+    // Application normally lives until reboot. Still make explicit teardown
+    // safe for host/unit-test lifetimes: stop the worker before its queue and
+    // media resources are released.
+    if (worker_task_ != nullptr) {
+        vTaskDelete(worker_task_);
+        worker_task_ = nullptr;
     }
+    media_server_.Stop();
     if (current_wav_ != nullptr) {
         heap_caps_free(current_wav_);
         current_wav_ = nullptr;
+    }
+    if (resource_queue_ != nullptr) {
+        vQueueDelete(resource_queue_);
+        resource_queue_ = nullptr;
     }
 }
 
