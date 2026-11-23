@@ -9,6 +9,14 @@
  * Minimal UPnP AVTransport control-point client.
  * All methods perform blocking HTTP I/O; call from a worker task.
  */
+enum class DlnaTransportState {
+    kUnknown,
+    kStopped,
+    kPlaying,
+    kPaused,
+    kTransitioning,
+};
+
 class DlnaControl {
 public:
     static bool SetUriAndPlay(const DlnaRenderer& renderer,
@@ -16,4 +24,7 @@ public:
                               const std::string& title,
                               uint32_t timeout_ms = 5000);
     static bool Stop(const DlnaRenderer& renderer, uint32_t timeout_ms = 5000);
+    static bool GetTransportState(const DlnaRenderer& renderer,
+                                  DlnaTransportState& state,
+                                  uint32_t timeout_ms = 3000);
 };
