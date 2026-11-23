@@ -73,12 +73,22 @@ bool DlnaPlaybackManager::Start(const std::string& host_ipv4) {
 
 bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
                                    int sample_rate, int channels) {
-    if (samples == nullptr || sample_count == 0 || resource_queue_ == nullptr ||
-        !sink_ready_.load()) return false;
+    if (samples == nullptr || sample_count == 0) return false;
 
     std::lock_guard<std::mutex> lock(buffer_mutex_);
+    if (utterance_decided_ && fallback_utterance_) return false;
+    if (!utterance_decided_) utterance_decided_ = true;
+
+    if (resource_queue_ == nullptr || !sink_ready_.load()) {
+        fallback_utterance_ = true;
+        return false;
+    }
+
     const uint8_t index = write_buffer_index_;
-    if (!buffer_ready_[index]) return false;
+    if (!buffer_ready_[index]) {
+        fallback_utterance_ = true;
+        return false;
+    }
 
     if (buffer_dropping_[index]) return true;
     if (!buffer_active_[index]) {
@@ -100,10 +110,17 @@ void DlnaPlaybackManager::EndUtterance() {
     {
         std::lock_guard<std::mutex> lock(buffer_mutex_);
         const uint8_t index = write_buffer_index_;
+        if (fallback_utterance_) {
+            fallback_utterance_ = false;
+            utterance_decided_ = false;
+            return;
+        }
         if (buffer_dropping_[index]) {
+            utterance_decided_ = false;
             buffers_[index].Reset();
             buffer_active_[index] = false;
             buffer_dropping_[index] = false;
+            utterance_decided_ = false;
             ESP_LOGW(kTag, "Discarded utterance that exceeded the PCM limit");
             return;
         }
@@ -112,11 +129,13 @@ void DlnaPlaybackManager::EndUtterance() {
         if (!buffers_[index].FinalizeWav(&resource.wav_data, &resource.wav_size)) {
             buffers_[index].Reset();
             buffer_active_[index] = false;
+            utterance_decided_ = false;
             ESP_LOGW(kTag, "No complete PCM utterance to publish");
             return;
         }
 
         resource.buffer_index = index;
+        utterance_decided_ = false;
         buffer_ready_[index] = false;
         buffer_active_[index] = false;
 
