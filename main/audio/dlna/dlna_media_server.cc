@@ -1,11 +1,8 @@
 #include "dlna_media_server.h"
 #include "dlna_resource_registry.h"
+#include "dlna_http_range.h"
 
-#include <algorithm>
-#include <cerrno>
-#include <cctype>
 #include <climits>
-#include <cstdlib>
 #include <string>
 
 #include <esp_log.h>
@@ -16,80 +13,6 @@ constexpr char kTag[] = "DlnaMediaServer";
 constexpr char kMediaPath[] = "/dlna/audio.wav";
 constexpr char kResourceWildcard[] = "/dlna/*";
 
-bool ParseSize(const std::string& text, size_t& value) {
-    if (text.empty() || !std::all_of(text.begin(), text.end(),
-                                    [](unsigned char c) { return c >= '0' && c <= '9'; })) {
-        return false;
-    }
-    errno = 0;
-    char* end = nullptr;
-    const unsigned long long parsed = std::strtoull(text.c_str(), &end, 10);
-    if (errno != 0 || end == text.c_str() || *end != '\0' ||
-        parsed > static_cast<unsigned long long>(SIZE_MAX)) {
-        return false;
-    }
-    value = static_cast<size_t>(parsed);
-    return true;
-}
-
-esp_err_t SendHeadResponse(httpd_req_t* request, const char* status,
-                           const char* content_type, size_t content_length,
-                           const char* content_range = nullptr,
-                           bool accept_ranges = false) {
-    std::string headers = "HTTP/1.1 ";
-    headers += status;
-    headers += "\r\nContent-Type: ";
-    headers += content_type;
-    headers += "\r\nContent-Length: ";
-    headers += std::to_string(content_length);
-    headers += "\r\n";
-    if (accept_ranges) headers += "Accept-Ranges: bytes\r\n";
-    if (content_range != nullptr) {
-        headers += "Content-Range: ";
-        headers += content_range;
-        headers += "\r\n";
-    }
-    headers += "\r\n";
-
-    size_t sent_total = 0;
-    while (sent_total < headers.size()) {
-        const int sent = httpd_send(request, headers.data() + sent_total,
-                                    headers.size() - sent_total);
-        if (sent <= 0) return ESP_FAIL;
-        sent_total += static_cast<size_t>(sent);
-    }
-    return ESP_OK;
-}
-
-bool ParseRange(const std::string& header, size_t total,
-                size_t& first, size_t& last) {
-    if (header.compare(0, 6, "bytes=") != 0 || header.find(',') != std::string::npos ||
-        total == 0) {
-        return false;
-    }
-    const std::string spec = header.substr(6);
-    const size_t dash = spec.find('-');
-    if (dash == std::string::npos) return false;
-
-    const std::string left = spec.substr(0, dash);
-    const std::string right = spec.substr(dash + 1);
-    if (left.empty()) {
-        size_t suffix = 0;
-        if (!ParseSize(right, suffix) || suffix == 0) return false;
-        first = suffix >= total ? 0 : total - suffix;
-        last = total - 1;
-        return true;
-    }
-
-    if (!ParseSize(left, first) || first >= total) return false;
-    if (right.empty()) {
-        last = total - 1;
-        return true;
-    }
-    if (!ParseSize(right, last) || last < first) return false;
-    last = std::min(last, total - 1);
-    return true;
-}
 }  // namespace
 
 DlnaMediaServer::~DlnaMediaServer() {
@@ -310,7 +233,8 @@ esp_err_t DlnaMediaServer::ServeResource(httpd_req_t* request,
             return result;
         }
         range.resize(std::char_traits<char>::length(range.c_str()));
-        if (!ParseRange(range, size, first, last)) {
+        const auto range_result = DlnaHttpRange::Parse(range, size, first, last);
+        if (range_result == DlnaHttpRange::Result::kUnsatisfiable) {
             const std::string content_range = "bytes */" + std::to_string(size);
             if (request->method == HTTP_HEAD) {
                 const esp_err_t result = SendHeadResponse(
@@ -326,7 +250,14 @@ esp_err_t DlnaMediaServer::ServeResource(httpd_req_t* request,
             log_result(416, 0);
             return result;
         }
-        partial = true;
+        // For malformed, unsupported-unit, or multipart Range headers, ignore
+        // the field and return the full WAV rather than incorrectly rejecting
+        // an otherwise valid media request.
+        partial = range_result == DlnaHttpRange::Result::kValid;
+        if (!partial) {
+            first = 0;
+            last = size - 1;
+        }
     }
 
     const size_t length = last - first + 1;
@@ -340,7 +271,7 @@ esp_err_t DlnaMediaServer::ServeResource(httpd_req_t* request,
             request, partial ? "206 Partial Content" : "200 OK",
             "audio/wav", length,
             partial ? content_range.c_str() : nullptr, true);
-        log_result(partial ? 206 : 200, result == ESP_OK ? length : 0);
+        log_result(partial ? 206 : 200, 0);
         return result;
     }
 
