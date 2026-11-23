@@ -310,7 +310,10 @@ void Application::HandleNetworkConnectedEvent() {
 #if CONFIG_DLNA_AUDIO_OUTPUT
     const std::string host_ipv4 = WifiManager::GetInstance().GetIpAddress();
     if (!host_ipv4.empty() && host_ipv4 != "0.0.0.0") {
-        if (!dlna_playback_manager_.Start(host_ipv4)) {
+        auto codec = Board::GetInstance().GetAudioCodec();
+        if (codec == nullptr ||
+            !dlna_playback_manager_.Start(host_ipv4, codec->output_sample_rate(),
+                                          codec->output_channels())) {
             ESP_LOGE(TAG, "Failed to start DLNA audio output manager");
         }
     } else {
