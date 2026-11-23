@@ -49,6 +49,7 @@ private:
         uint32_t duration_ms = 0;
         int64_t first_pcm_us = 0;
         int64_t finalized_us = 0;
+        int64_t control_response_us = 0;
     };
 
     static void WorkerEntry(void* arg);
