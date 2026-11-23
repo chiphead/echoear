@@ -76,7 +76,7 @@ std::string Element(const std::string& xml, const char* local_name, size_t from 
         const std::string close_tag = "</" + tag + ">";
         const size_t close = xml.find(close_tag, name_end);
         if (close == std::string::npos) return {};
-        return Trim(xml.substr(name_end, close - name_end));
+        return Trim(xml.substr(name_end + 1, close - name_end - 1));
     }
     return {};
 }
