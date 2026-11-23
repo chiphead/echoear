@@ -32,8 +32,6 @@ bool DlnaResourceRegistry::Publish(uint32_t generation, uint32_t sequence,
                      std::to_string(sequence) + ".wav";
         entry.data = wav_data;
         entry.size = wav_size;
-        entry.lease_id = next_lease_id_++;
-        if (next_lease_id_ == 0) next_lease_id_ = 1;
         entry.references = 0;
         entry.occupied = true;
         entry.retired = false;
@@ -49,25 +47,53 @@ bool DlnaResourceRegistry::Publish(uint32_t generation, uint32_t sequence,
 bool DlnaResourceRegistry::Acquire(const std::string& path,
                                    DlnaResourceView& view) {
     std::lock_guard<std::mutex> lock(mutex_);
-    for (auto& entry : entries_) {
-        if (!entry.occupied || entry.retired || entry.path != path) continue;
-        if (entry.references == UINT16_MAX) return false;
-        ++entry.references;
-        view.data = entry.data;
-        view.size = entry.size;
-        view.lease_id = entry.lease_id;
-        return true;
+    size_t entry_index = kMaxResources;
+    for (size_t i = 0; i < entries_.size(); ++i) {
+        const auto& entry = entries_[i];
+        if (entry.occupied && !entry.retired && entry.path == path) {
+            entry_index = i;
+            break;
+        }
     }
-    return false;
+    if (entry_index == kMaxResources || entries_[entry_index].references == UINT16_MAX) {
+        return false;
+    }
+
+    Lease* free_lease = nullptr;
+    for (auto& lease : leases_) {
+        if (!lease.active) {
+            free_lease = &lease;
+            break;
+        }
+    }
+    if (free_lease == nullptr) return false;
+
+    uint32_t lease_id = next_lease_id_++;
+    if (lease_id == 0) lease_id = next_lease_id_++;
+    if (next_lease_id_ == 0) next_lease_id_ = 1;
+    free_lease->id = lease_id;
+    free_lease->entry_index = static_cast<uint8_t>(entry_index);
+    free_lease->active = true;
+
+    Entry& entry = entries_[entry_index];
+    ++entry.references;
+    view.data = entry.data;
+    view.size = entry.size;
+    view.lease_id = lease_id;
+    return true;
 }
 
 void DlnaResourceRegistry::Release(uint32_t lease_id) {
     if (lease_id == 0) return;
     std::lock_guard<std::mutex> lock(mutex_);
-    for (auto& entry : entries_) {
-        if (!entry.occupied || entry.lease_id != lease_id) continue;
-        if (entry.references > 0) --entry.references;
-        if (entry.retired && entry.references == 0) FreeEntry(entry);
+    for (auto& lease : leases_) {
+        if (!lease.active || lease.id != lease_id) continue;
+        lease.active = false;
+        lease.id = 0;
+        if (lease.entry_index >= entries_.size()) return;
+        Entry& entry = entries_[lease.entry_index];
+        if (entry.occupied && entry.references > 0) --entry.references;
+        if (entry.occupied && entry.retired && entry.references == 0) FreeEntry(entry);
         return;
     }
 }
