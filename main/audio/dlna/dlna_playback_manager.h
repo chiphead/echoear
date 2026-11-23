@@ -41,13 +41,14 @@ private:
         uint8_t* wav_data = nullptr;
         size_t wav_size = 0;
         uint8_t buffer_index = 0;
+        uint32_t utterance_generation = 0;
     };
 
     static void WorkerEntry(void* arg);
     void Worker();
     bool FindSonyRenderer(DlnaRenderer& renderer);
     void ProcessResource(const Resource& resource);
-    void WaitForPlaybackCompletion(size_t wav_size);
+    void WaitForPlaybackCompletion(size_t wav_size, uint32_t utterance_generation);
     bool QueueSegmentLocked(uint8_t index);
 
     static constexpr size_t kBufferCount = 2;
@@ -59,6 +60,8 @@ private:
     bool utterance_decided_ = false;
     bool fallback_utterance_ = false;
     bool discard_until_drain_ = false;
+    uint32_t current_utterance_generation_ = 0;
+    std::atomic<uint32_t> utterance_generation_{0};
     std::mutex buffer_mutex_;
     std::mutex state_mutex_;
 
