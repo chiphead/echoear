@@ -73,7 +73,8 @@ bool DlnaPlaybackManager::Start(const std::string& host_ipv4) {
 
 bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
                                    int sample_rate, int channels) {
-    if (samples == nullptr || sample_count == 0 || resource_queue_ == nullptr) return false;
+    if (samples == nullptr || sample_count == 0 || resource_queue_ == nullptr ||
+        !sink_ready_.load()) return false;
 
     std::lock_guard<std::mutex> lock(buffer_mutex_);
     const uint8_t index = write_buffer_index_;
@@ -198,6 +199,7 @@ void DlnaPlaybackManager::Worker() {
         if (!renderer_ready_ &&
             (next_discovery == 0 || xTaskGetTickCount() >= next_discovery)) {
             renderer_ready_ = FindSonyRenderer(renderer_);
+            sink_ready_.store(renderer_ready_);
             next_discovery = xTaskGetTickCount() + pdMS_TO_TICKS(5000);
         }
 
