@@ -1,18 +1,6 @@
 name: DLNA Host Tests
 
 on:
-  push:
-    branches:
-      - feature/dlna-sony-x88-audio
-    paths:
-      - "main/audio/dlna/**"
-      - "main/audio/audio_service.cc"
-      - "main/audio/audio_service.h"
-      - "main/application.cc"
-      - "scripts/tests/test_dlna_*.py"
-      - "main/CMakeLists.txt"
-      - "main/idf_component.yml"
-      - ".github/workflows/dlna-host-tests.yml"
   pull_request:
     branches:
       - main
@@ -48,3 +36,5 @@ jobs:
         run: python3 scripts/tests/test_dlna_xml.py
       - name: Compile and run PCM buffer tests
         run: python3 scripts/tests/test_dlna_pcm_buffer.py
+      - name: Compile and run HTTP Range tests
+        run: python3 scripts/tests/test_dlna_http_range.py
