@@ -152,6 +152,7 @@ The worker still handles at most one look-ahead item because the registry is del
 
 - SOAP response extraction now matches XML local element names, so `CurrentURI` and `CurrentTransportState` can be read whether the renderer includes an element namespace prefix or not. Extracted text is XML-entity-decoded before URI comparison.
 - Playback now has an absolute duration watchdog (`WAV duration + 15 seconds`, capped at 180 seconds). It applies even if PLAYING was observed earlier, preventing a renderer that stops answering status queries or remains stuck in PLAYING from permanently blocking the worker. The watchdog is a recovery bound, not a claim that the renderer actually completed playback.
+- A failed or timed-out `SetNextAVTransportURI` SOAP response is treated as ambiguous rather than a definitive rejection. The worker still polls `CurrentURI` and allows the bounded transition-observation window before sequential fallback, because the renderer may have accepted the action even if its response was lost. If the URI never changes, the existing sequential fallback remains in place.
 
 ## Host-side registry regression tests
 
