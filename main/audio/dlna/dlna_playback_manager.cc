@@ -622,7 +622,7 @@ void DlnaPlaybackManager::Worker() {
     TickType_t next_discovery = 0;
     while (!stopping_.load()) {
         // Recycle requests are independent of the bounded resource queue, so
-        // a full queue cannot permanently consume one of the two PCM buffers.
+        // a full queue cannot permanently consume one of the three PCM buffers.
         uint32_t recycle = recycle_mask_.exchange(0);
         for (uint8_t i = 0; i < kBufferCount; ++i) {
             if ((recycle & (1u << i)) == 0) continue;
