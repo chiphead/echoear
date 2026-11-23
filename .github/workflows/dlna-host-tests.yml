@@ -1,9 +1,6 @@
 name: DLNA Host Tests
 
 on:
-  push:
-    branches:
-      - feature/dlna-sony-x88-audio
   pull_request:
     branches:
       - main
