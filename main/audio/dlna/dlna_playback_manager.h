@@ -64,7 +64,15 @@ private:
     // Three accumulators provide two queued look-ahead segments while the worker
     // owns the currently playing immutable WAV resource.
     static constexpr size_t kBufferCount = 3;
-    DlnaPcmBuffer buffers_[kBufferCount];
+    // Pass the segment capacity explicitly at the owning call site. This makes
+    // the runtime allocation independent of constructor default-argument
+    // propagation in incremental ESP-IDF builds.
+    static constexpr size_t kPcmSegmentBytes = 64 * 1024;
+    DlnaPcmBuffer buffers_[kBufferCount] = {
+        DlnaPcmBuffer(kPcmSegmentBytes),
+        DlnaPcmBuffer(kPcmSegmentBytes),
+        DlnaPcmBuffer(kPcmSegmentBytes),
+    };
     bool buffer_ready_[kBufferCount] = {false, false, false};
     bool buffer_active_[kBufferCount] = {false, false, false};
     bool buffer_dropping_[kBufferCount] = {false, false, false};
