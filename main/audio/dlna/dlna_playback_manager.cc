@@ -61,6 +61,18 @@ DlnaPlaybackManager::~DlnaPlaybackManager() {
 bool DlnaPlaybackManager::Start(const std::string& host_ipv4, int source_sample_rate, int channels) {
     if (host_ipv4.empty() || source_sample_rate <= 0 || channels < 1 || channels > 2) return false;
     if (worker_task_ != nullptr) {
+        // The resampler and its preallocated output buffer are initialized once
+        // for the lifetime of the worker. Do not silently accept a reconnect
+        // with a different codec format; that would route frames through a
+        // converter configured for the previous stream.
+        if (source_sample_rate != resampler_source_rate_ ||
+            channels != resampler_channels_) {
+            ESP_LOGE(kTag,
+                     "Reconnect PCM format changed (%d Hz/%d ch; expected %d Hz/%d ch)",
+                     source_sample_rate, channels, resampler_source_rate_,
+                     resampler_channels_);
+            return false;
+        }
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
             host_ipv4_ = host_ipv4;
