@@ -52,7 +52,6 @@ private:
     void Worker();
     bool FindSonyRenderer(DlnaRenderer& renderer);
     void ProcessResource(const Resource& resource);
-    void WaitForPlaybackCompletion(size_t wav_size, uint32_t utterance_generation);
     bool QueueSegmentLocked(uint8_t index);
     int FindReadyBufferLocked(uint8_t after_index) const;
     bool InitializeResampler(int source_sample_rate, int channels);
@@ -94,6 +93,5 @@ private:
 
     DlnaResourceRegistry resource_registry_;
     DlnaMediaServer media_server_;
-    uint8_t* current_wav_ = nullptr;
     uint32_t resource_sequence_ = 0;
 };
