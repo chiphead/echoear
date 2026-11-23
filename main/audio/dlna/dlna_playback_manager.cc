@@ -77,11 +77,12 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
 
     std::lock_guard<std::mutex> lock(buffer_mutex_);
     if (utterance_decided_ && fallback_utterance_) return false;
-    if (!utterance_decided_) utterance_decided_ = true;
-
-    if (resource_queue_ == nullptr || !sink_ready_.load()) {
-        fallback_utterance_ = true;
-        return false;
+    if (!utterance_decided_) {
+        utterance_decided_ = true;
+        if (resource_queue_ == nullptr || !sink_ready_.load()) {
+            fallback_utterance_ = true;
+            return false;
+        }
     }
 
     const uint8_t index = write_buffer_index_;
@@ -92,7 +93,10 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
 
     if (buffer_dropping_[index]) return true;
     if (!buffer_active_[index]) {
-        if (!buffers_[index].Begin(sample_rate, channels)) return false;
+        if (!buffers_[index].Begin(sample_rate, channels)) {
+            fallback_utterance_ = true;
+            return false;
+        }
         buffer_active_[index] = true;
     }
     if (!buffers_[index].Append(samples, sample_count)) {
@@ -116,7 +120,6 @@ void DlnaPlaybackManager::EndUtterance() {
             return;
         }
         if (buffer_dropping_[index]) {
-            utterance_decided_ = false;
             buffers_[index].Reset();
             buffer_active_[index] = false;
             buffer_dropping_[index] = false;
