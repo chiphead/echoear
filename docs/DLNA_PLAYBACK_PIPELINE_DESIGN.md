@@ -256,3 +256,10 @@ AVTransport SOAP escaping and response extraction now share the header-only `dln
 - Immediately after the SOAP call returns, the worker now rechecks stop/network/generation state and exits the current processing loop before transport polling or sequential fallback can issue another AVTransport mutation for the stale generation.
 - The common exit cleanup remains responsible for stopping EchoEar playback and retiring current/next resources. Published resources remain protected by HTTP leases; unpublished look-ahead WAV data remains owned by the worker and is freed there.
 - This narrows the stale-session window but cannot cancel a SOAP request already sent to the renderer. A complete build and real disconnect/reconnect exercise remain outstanding.
+
+## Require an active network session when routing a new utterance
+
+- `sink_ready_` is an atomic readiness hint, not a complete network-session predicate. During reconnect, SSDP/device-description work and `NotifyNetworkDisconnected()` can overlap; a late discovery result may briefly race with the disconnect-side readiness clear.
+- The first PCM frame of each utterance now requires all of: a live resource queue, `sink_ready_`, `network_available_`, and `!network_lost_`. If any condition is false, the entire utterance is routed to the local codec rather than entering a stale DLNA session.
+- Once an utterance has committed to DLNA, the existing discard-until-drain behavior still prevents mid-utterance local/DLNA mixing after a disconnect.
+- This is a defensive routing gate. It does not prove reconnect behavior on hardware; discovery completion racing with network loss still requires an on-device exercise.
