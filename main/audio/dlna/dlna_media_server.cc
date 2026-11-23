@@ -21,7 +21,7 @@ constexpr size_t kHttpSendChunkBytes = 4096;
 // not only each socket send(), so a slow client cannot pin a resource lease and
 // stall subsequent media requests indefinitely.
 bool SendAllWithDeadline(httpd_req_t* request, const char* data, size_t size,
-                         int64_t deadline_us) {
+                         int64_t deadline_us, size_t* sent_total = nullptr) {
     size_t offset = 0;
     while (offset < size) {
         if (esp_timer_get_time() >= deadline_us) return false;
@@ -29,6 +29,7 @@ bool SendAllWithDeadline(httpd_req_t* request, const char* data, size_t size,
         const int sent = httpd_send(request, data + offset, chunk);
         if (sent <= 0) return false;
         offset += static_cast<size_t>(sent);
+        if (sent_total != nullptr) *sent_total += static_cast<size_t>(sent);
     }
     return true;
 }
@@ -37,7 +38,9 @@ esp_err_t SendHttpResponse(httpd_req_t* request, const char* status,
                            const char* content_type, size_t content_length,
                            const char* body, size_t body_length,
                            const char* content_range = nullptr,
-                           bool accept_ranges = false) {
+                           bool accept_ranges = false,
+                           size_t* body_bytes_sent = nullptr) {
+    if (body_bytes_sent != nullptr) *body_bytes_sent = 0;
     std::string headers = "HTTP/1.1 ";
     headers += status;
     headers += "\r\nContent-Type: ";
@@ -58,7 +61,7 @@ esp_err_t SendHttpResponse(httpd_req_t* request, const char* status,
         return ESP_FAIL;
     }
     if (body != nullptr && body_length > 0 &&
-        !SendAllWithDeadline(request, body, body_length, deadline_us)) {
+        !SendAllWithDeadline(request, body, body_length, deadline_us, body_bytes_sent)) {
         return ESP_FAIL;
     }
     return ESP_OK;
@@ -346,17 +349,17 @@ esp_err_t DlnaMediaServer::ServeResource(httpd_req_t* request,
         content_range = "bytes " + std::to_string(first) + "-" +
                         std::to_string(last) + "/" + std::to_string(size);
     }
+    size_t body_bytes_sent = 0;
     const esp_err_t result = SendHttpResponse(
         request, partial ? "206 Partial Content" : "200 OK",
         "audio/wav", length,
         reinterpret_cast<const char*>(data + first), length,
-        partial ? content_range.c_str() : nullptr, true);
+        partial ? content_range.c_str() : nullptr, true, &body_bytes_sent);
     if (result != ESP_OK) {
-        ESP_LOGW(kTag, "Failed to send media bytes %u..%u",
-                 static_cast<unsigned>(first), static_cast<unsigned>(last));
-        log_result(partial ? 206 : 200, 0);
-    } else {
-        log_result(partial ? 206 : 200, length);
+        ESP_LOGW(kTag, "Media response stopped after %u/%u body bytes",
+                 static_cast<unsigned>(body_bytes_sent),
+                 static_cast<unsigned>(length));
     }
+    log_result(partial ? 206 : 200, body_bytes_sent);
     return result;
 }
