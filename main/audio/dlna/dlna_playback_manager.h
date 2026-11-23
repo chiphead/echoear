@@ -47,6 +47,8 @@ private:
         uint8_t buffer_index = 0;
         uint32_t utterance_generation = 0;
         uint32_t duration_ms = 0;
+        int64_t first_pcm_us = 0;
+        int64_t finalized_us = 0;
     };
 
     static void WorkerEntry(void* arg);
