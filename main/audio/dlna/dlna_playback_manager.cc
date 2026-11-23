@@ -746,13 +746,16 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         if (have_next && next.published && current.observed_playing && !next.next_action_attempted &&
             renderer_.supports_set_next_av_transport_uri) {
             next.next_action_attempted = true;
-            next.next_action_maybe_accepted = DlnaControl::SetNextUri(
+            const bool next_action_response_ok = DlnaControl::SetNextUri(
                 renderer_, next.uri, "EchoEar audio", kControlTimeoutMs);
-            if (next.next_action_maybe_accepted) {
-                next.next_action_maybe_accepted_at = xTaskGetTickCount();
-            }
-            if (!next.next_action_maybe_accepted) {
-                ESP_LOGW(kTag, "SetNext rejected; sequential fallback retained");
+            // A timeout/error response is ambiguous: the renderer may have
+            // accepted SetNextAVTransportURI before the SOAP response was lost.
+            // Observe CurrentURI in either case before deciding to overwrite it.
+            next.next_action_maybe_accepted = true;
+            next.next_action_maybe_accepted_at = xTaskGetTickCount();
+            if (!next_action_response_ok) {
+                ESP_LOGW(kTag,
+                         "SetNext response failed; checking renderer URI before sequential fallback");
             }
         }
 
