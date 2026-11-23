@@ -235,3 +235,10 @@ AVTransport SOAP escaping and response extraction now share the header-only `dln
 - On confirmed takeover, the worker retires EchoEar's current and look-ahead URLs without sending `Stop`. This avoids interrupting content selected by another controller. Registry leases continue protecting any HTTP response already in flight; later requests to retired EchoEar URLs are rejected.
 - URI takeover detection is intentionally suspended before the first confirmed `PLAYING` state and while the renderer reports `STOPPED`/`TRANSITIONING`. Those states are handled by the existing startup, completion, and next-item transition logic.
 - The 3-second polling interval and two-query threshold are conservative software defaults, not measurements of Sony SRS-X88 response behavior. Physical-device validation remains outstanding.
+
+## Protecting AVTransport updates from external controllers
+
+- Before issuing `SetNextAVTransportURI`, the worker performs a fresh `GetMediaInfo` and requires `CurrentURI` to still equal the active EchoEar item. A failed query defers the action; a mismatch is confirmed on a second successful observation before the worker abandons its queued item.
+- Before sequential `SetAVTransportURI` + `Play` fallback, the worker again confirms that `CurrentURI` belongs to the current EchoEar item or to the already-submitted preloaded next item. An unrelated or empty URI is not overwritten; after two successful mismatches the worker leaves the renderer untouched and retires EchoEar resources.
+- These checks close the race between the 3-second background URI observer and an AVTransport-changing SOAP action. They intentionally favor not overwriting another controller's selection when the renderer's current ownership cannot be established.
+- If `GetMediaInfo` is temporarily unavailable, the worker retains the WAV resources and retries on a later polling cycle rather than guessing. The Sony X88's exact `CurrentURI` behavior after a user-initiated Stop or natural completion remains unverified and may affect sequential continuation; validate this on hardware.
