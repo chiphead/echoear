@@ -34,6 +34,7 @@ public:
     bool WritePcm(const int16_t* samples, size_t sample_count,
                   int sample_rate, int channels);
     void EndUtterance();
+    void AbortUtterance();
 
 private:
     struct Resource {
@@ -55,6 +56,7 @@ private:
     uint8_t write_buffer_index_ = 0;
     bool utterance_decided_ = false;
     bool fallback_utterance_ = false;
+    bool discard_until_drain_ = false;
     std::mutex buffer_mutex_;
     std::mutex state_mutex_;
 
