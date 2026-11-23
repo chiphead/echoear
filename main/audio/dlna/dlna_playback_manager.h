@@ -47,6 +47,7 @@ private:
     void Worker();
     bool FindSonyRenderer(DlnaRenderer& renderer);
     void ProcessResource(const Resource& resource);
+    void WaitForPlaybackCompletion(size_t wav_size);
 
     static constexpr size_t kBufferCount = 2;
     DlnaPcmBuffer buffers_[kBufferCount];
