@@ -117,7 +117,7 @@ bool DlnaMediaServer::Start(const std::string& host_ipv4, const uint8_t* wav_dat
     }
 
     wav_data_ = wav_data;
-    size = wav_size;
+    wav_size_ = wav_size;
 
     httpd_uri_t get_uri{};
     get_uri.uri = kMediaPath;
@@ -144,7 +144,7 @@ bool DlnaMediaServer::Start(const std::string& host_ipv4, const uint8_t* wav_dat
 
     media_uri_ = "http://" + host_ipv4 + ":" + std::to_string(port) + kMediaPath;
     ESP_LOGI(kTag, "Serving WAV resource at %s (%u bytes)",
-             media_uri_.c_str(), static_cast<unsigned>(size));
+             media_uri_.c_str(), static_cast<unsigned>(wav_size_));
     return true;
 }
 
@@ -204,7 +204,7 @@ void DlnaMediaServer::Stop() {
     }
     registry_ = nullptr;
     wav_data_ = nullptr;
-    size = 0;
+    wav_size_ = 0;
     media_uri_.clear();
 }
 
