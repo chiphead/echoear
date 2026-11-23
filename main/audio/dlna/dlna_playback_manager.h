@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <atomic>
 #include <mutex>
+
+#include <freertos/semphr.h>
 #include <string>
 
 #include <freertos/FreeRTOS.h>
@@ -64,6 +66,9 @@ private:
     std::atomic<bool> sink_ready_{false};
     std::atomic<bool> network_available_{false};
     std::atomic<bool> network_lost_{false};
+    std::atomic<uint32_t> recycle_mask_{0};
+    std::atomic<bool> stopping_{false};
+    SemaphoreHandle_t worker_stopped_ = nullptr;
 
     DlnaMediaServer media_server_;
     uint8_t* current_wav_ = nullptr;
