@@ -639,9 +639,23 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
     }
     if (!DlnaControl::SetUriAndPlay(renderer_, current.uri,
                                     "EchoEar audio", kControlTimeoutMs)) {
-        resource_registry_.Retire(current.path);
+        // SetUriAndPlay() is a two-step operation. SetAVTransportURI may have
+        // succeeded even when the subsequent Play request timed out, so the
+        // renderer may still fetch this resource after the caller sees failure.
+        // Stop it before retiring the URI; if Stop is ambiguous too, leave the
+        // registry intact for the worker's HTTPD-shutdown cleanup path.
+        const bool renderer_stopped =
+            DlnaControl::Stop(renderer_, kControlTimeoutMs);
         renderer_ready_ = false;
         sink_ready_.store(false);
+        if (renderer_stopped) {
+            resource_registry_.Retire(current.path);
+        } else {
+            network_available_.store(false);
+            network_lost_.store(true);
+            ESP_LOGE(kTag,
+                     "Initial SetUriAndPlay and recovery Stop failed; retaining WAV until HTTPD shutdown");
+        }
         return;
     }
     current.started = xTaskGetTickCount();
@@ -847,7 +861,25 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                     ESP_LOGI(kTag, "Started next item using sequential fallback");
                     continue;
                 }
-                ESP_LOGE(kTag, "Could not start next DLNA item");
+                // As above, a failed SetUriAndPlay can mean SetAVTransportURI
+                // succeeded but Play's response was lost. Do not retire either
+                // URI until the renderer has been stopped or HTTPD is shut down.
+                ESP_LOGE(kTag, "Could not start next DLNA item; stopping renderer before cleanup");
+                renderer_ready_ = false;
+                sink_ready_.store(false);
+                if (!DlnaControl::Stop(renderer_, kControlTimeoutMs)) {
+                    network_available_.store(false);
+                    network_lost_.store(true);
+                    if (have_next && !next.published &&
+                        next.resource.wav_data != nullptr) {
+                        heap_caps_free(next.resource.wav_data);
+                        next.resource.wav_data = nullptr;
+                        next.resource.wav_size = 0;
+                    }
+                    ESP_LOGE(kTag,
+                             "Recovery Stop failed; retaining published WAVs until HTTPD shutdown");
+                    return;
+                }
                 break;
             }
             if (stopped_since == 0) {
