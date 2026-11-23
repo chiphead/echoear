@@ -131,3 +131,10 @@ The playback manager has not yet been switched to this overload. The current liv
 - Network-loss and worker-shutdown paths stop HTTPD before retiring all resources. The manager's `current_wav_` is now a non-owning pointer used only to calculate the playback duration while the registry owns the allocation.
 
 This is persistent multi-URL serving with sequential AVTransport commands, not gapless playback. `ProcessResource()` still waits for the current item to finish before the worker dequeues the next item. The next engineering milestone remains a state-driven worker that can issue `SetNextAVTransportURI` while the current item is playing, gated by the SCPD capability probe and confirmed on the SRS-X88.
+
+## SetNextAVTransportURI control groundwork
+
+- Added `DlnaControl::SetNextUri()`, including DIDL-Lite metadata and SOAP invocation.
+- The method refuses to send the action unless the parsed renderer SCPD explicitly advertised `SetNextAVTransportURI`.
+- This API is not yet called by the playback manager. The current worker remains sequential and continues using `SetAVTransportURI` + `Play` for each segment.
+- The ESP-IDF 6.1 HTTP server implementation was checked: `httpd_stop()` waits until the HTTPD task reaches `THREAD_STOPPED` before deleting the server instance. The media server now preserves its handle/context if `httpd_stop()` reports failure rather than pretending handlers have exited.
