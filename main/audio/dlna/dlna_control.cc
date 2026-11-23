@@ -134,15 +134,7 @@ bool DlnaControl::SetNextUri(const DlnaRenderer& renderer,
         return false;
     }
 
-    const std::string metadata =
-        "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" "
-        "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" "
-        "xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\">"
-        "<item id=\"0\" parentID=\"-1\" restricted=\"1\">"
-        "<dc:title>" + DlnaXml::Escape(title.empty() ? "EchoEar audio" : title) + "</dc:title>"
-        "<upnp:class>object.item.audioItem.musicTrack</upnp:class>"
-        "<res protocolInfo=\"http-get:*:audio/wav:*\">" +
-        DlnaXml::Escape(media_uri) + "</res></item></DIDL-Lite>";
+    const std::string metadata = DlnaXml::BuildDidlMetadata(media_uri, title);
 
     const std::string arguments =
         "<InstanceID>0</InstanceID><NextURI>" + DlnaXml::Escape(media_uri) +
