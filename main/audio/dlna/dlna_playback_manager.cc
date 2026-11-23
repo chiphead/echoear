@@ -29,21 +29,26 @@ bool IsSonyX88(const DlnaRenderer& renderer) {
 }  // namespace
 
 DlnaPlaybackManager::~DlnaPlaybackManager() {
-    // Application normally lives until reboot. Still make explicit teardown
-    // safe for host/unit-test lifetimes: stop the worker before its queue and
-    // media resources are released.
     if (worker_task_ != nullptr) {
-        vTaskDelete(worker_task_);
+        stopping_.store(true);
+        // Let the worker leave its bounded queue wait and release HTTP/WAV
+        // resources itself; never delete a task while it may own them.
+        if (worker_stopped_ != nullptr) {
+            xSemaphoreTake(worker_stopped_, portMAX_DELAY);
+        }
         worker_task_ = nullptr;
     }
-    media_server_.Stop();
-    if (current_wav_ != nullptr) {
-        heap_caps_free(current_wav_);
-        current_wav_ = nullptr;
-    }
     if (resource_queue_ != nullptr) {
+        Resource pending{};
+        while (xQueueReceive(resource_queue_, &pending, 0) == pdTRUE) {
+            if (pending.wav_data != nullptr) heap_caps_free(pending.wav_data);
+        }
         vQueueDelete(resource_queue_);
         resource_queue_ = nullptr;
+    }
+    if (worker_stopped_ != nullptr) {
+        vSemaphoreDelete(worker_stopped_);
+        worker_stopped_ = nullptr;
     }
 }
 
@@ -77,9 +82,20 @@ bool DlnaPlaybackManager::Start(const std::string& host_ipv4) {
         ESP_LOGE(kTag, "Unable to create resource queue");
         return false;
     }
+    worker_stopped_ = xSemaphoreCreateBinary();
+    if (worker_stopped_ == nullptr) {
+        vQueueDelete(resource_queue_);
+        resource_queue_ = nullptr;
+        ESP_LOGE(kTag, "Unable to create worker completion semaphore");
+        return false;
+    }
+    stopping_.store(false);
+    recycle_mask_.store(0);
 
     if (xTaskCreate(WorkerEntry, "dlna_playback", 9216, this, 4, &worker_task_) != pdPASS) {
         worker_task_ = nullptr;
+        vSemaphoreDelete(worker_stopped_);
+        worker_stopped_ = nullptr;
         vQueueDelete(resource_queue_);
         resource_queue_ = nullptr;
         ESP_LOGE(kTag, "Unable to create DLNA worker");
@@ -179,15 +195,19 @@ void DlnaPlaybackManager::EndUtterance() {
     if (xQueueSend(resource_queue_, &resource, 0) != pdTRUE) {
         ESP_LOGW(kTag, "DLNA resource queue full; dropping completed utterance");
         heap_caps_free(resource.wav_data);
-        // The worker is woken so it can recreate this buffer allocation.
-        Resource recycle{};
-        recycle.buffer_index = resource.buffer_index;
-        xQueueSend(resource_queue_, &recycle, 0);
+        // Queue saturation must not permanently strand this buffer. The
+        // worker polls this bitmask independently of the resource queue.
+        recycle_mask_.fetch_or(1u << resource.buffer_index);
+
     }
 }
 
 void DlnaPlaybackManager::WorkerEntry(void* arg) {
-    static_cast<DlnaPlaybackManager*>(arg)->Worker();
+    auto* manager = static_cast<DlnaPlaybackManager*>(arg);
+    manager->Worker();
+    if (manager->worker_stopped_ != nullptr) {
+        xSemaphoreGive(manager->worker_stopped_);
+    }
     vTaskDelete(nullptr);
 }
 
@@ -265,7 +285,28 @@ void DlnaPlaybackManager::ProcessResource(const Resource& resource) {
 
 void DlnaPlaybackManager::Worker() {
     TickType_t next_discovery = 0;
-    while (true) {
+    while (!stopping_.load()) {
+        // Recycle requests are independent of the bounded resource queue, so
+        // a full queue cannot permanently consume one of the two PCM buffers.
+        uint32_t recycle = recycle_mask_.exchange(0);
+        for (uint8_t i = 0; i < kBufferCount; ++i) {
+            if ((recycle & (1u << i)) == 0) continue;
+            const bool recycled = buffers_[i].Initialize();
+            {
+                std::lock_guard<std::mutex> lock(buffer_mutex_);
+                buffer_ready_[i] = recycled;
+                buffer_active_[i] = false;
+                buffer_dropping_[i] = false;
+                if (!buffer_ready_[write_buffer_index_] && recycled) {
+                    write_buffer_index_ = i;
+                }
+            }
+            if (!recycled) {
+                ESP_LOGE(kTag, "Could not recycle PCM buffer %u",
+                         static_cast<unsigned>(i));
+            }
+        }
+
         if (network_lost_.exchange(false)) {
             sink_ready_.store(false);
             if (media_server_.IsRunning()) {
@@ -289,9 +330,10 @@ void DlnaPlaybackManager::Worker() {
         }
 
         Resource resource{};
-        if (xQueueReceive(resource_queue_, &resource, pdMS_TO_TICKS(1000)) == pdTRUE) {
-            // Recreate the just-finalized accumulator in worker context. Its
-            // WAV allocation is independent and remains owned by the server.
+        if (xQueueReceive(resource_queue_, &resource, pdMS_TO_TICKS(100)) == pdTRUE) {
+            // The normal path recycles the buffer before network work. The
+            // allocation belongs to the worker now; the WAV resource remains
+            // independent and immutable.
             const bool recycled = buffers_[resource.buffer_index].Initialize();
             {
                 std::lock_guard<std::mutex> lock(buffer_mutex_);
@@ -317,4 +359,15 @@ void DlnaPlaybackManager::Worker() {
             }
         }
     }
+
+    sink_ready_.store(false);
+    if (media_server_.IsRunning()) {
+        if (renderer_ready_) DlnaControl::Stop(renderer_, kControlTimeoutMs);
+        media_server_.Stop();
+    }
+    if (current_wav_ != nullptr) {
+        heap_caps_free(current_wav_);
+        current_wav_ = nullptr;
+    }
+    renderer_ready_ = false;
 }
