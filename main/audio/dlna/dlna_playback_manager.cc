@@ -711,6 +711,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
     TickType_t fallback_uri_unconfirmed_since = 0;
     bool fallback_uri_unconfirmed = false;
     uint8_t unexpected_uri_mismatch_count = 0;
+    TickType_t next_position_info_poll = xTaskGetTickCount();
 
     while (!stopping_.load() && network_available_.load() &&
            !network_lost_.load() &&
@@ -844,6 +845,28 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             }
             current.observed_playing = true;
             stopped_since = 0;
+        }
+
+        // PositionInfo is deliberately sampled at low frequency: it adds a
+        // SOAP round-trip, so avoid competing with the renderer's transition
+        // handling on every 650 ms state poll. Sample both active playback and
+        // a preloaded URI that Sony has already made current, including STOPPED
+        // or TRANSITIONING windows.
+        const TickType_t position_now = xTaskGetTickCount();
+        if ((current.observed_playing || next.next_uri_observed) &&
+            static_cast<int32_t>(position_now - next_position_info_poll) >= 0) {
+            next_position_info_poll =
+                position_now + pdMS_TO_TICKS(2500);
+            std::string track_duration;
+            std::string relative_time;
+            std::string track_uri;
+            if (DlnaControl::GetPositionInfo(renderer_, track_duration,
+                                            relative_time, track_uri, 1500)) {
+                ESP_LOGI(kTag,
+                         "Renderer position: duration=%s rel_time=%s track_uri=%s",
+                         track_duration.c_str(), relative_time.c_str(),
+                         track_uri.c_str());
+            }
         }
 
         bool next_is_current = false;
