@@ -120,3 +120,14 @@ This is the first isolated implementation step. The registry is not yet connecte
 - Registered WAV sizes are bounded to the signed response length accepted by the HTTP server API.
 
 The playback manager has not yet been switched to this overload. The current live playback path still starts/stops the legacy one-resource server per segment. The registry-backed overload is an isolated integration point; it does not yet provide concurrent preloading or gapless playback.
+
+## Playback manager integration progress
+
+- `DlnaPlaybackManager` now owns a `DlnaResourceRegistry` whose lifetime extends beyond the HTTP server; member declaration order ensures the server is destroyed/stopped before the registry.
+- The worker starts the registry-backed HTTP server on the first segment and reuses it for later segments in the same renderer/network session.
+- Each finalized WAV is published under its generation/sequence path. SOAP `SetAVTransportURI` receives that exact URL.
+- The registry takes WAV ownership only after successful Publish. On Publish failure, the manager frees the still-owned allocation. On success, Retire is the only normal release path.
+- Playback completion retires the current resource without stopping the HTTP server. In-flight GET/HEAD/Range requests retain their leases, so bytes are freed only after request completion.
+- Network-loss and worker-shutdown paths stop HTTPD before retiring all resources. The manager's `current_wav_` is now a non-owning pointer used only to calculate the playback duration while the registry owns the allocation.
+
+This is persistent multi-URL serving with sequential AVTransport commands, not gapless playback. `ProcessResource()` still waits for the current item to finish before the worker dequeues the next item. The next engineering milestone remains a state-driven worker that can issue `SetNextAVTransportURI` while the current item is playing, gated by the SCPD capability probe and confirmed on the SRS-X88.
