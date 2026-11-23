@@ -12,6 +12,7 @@
 enum class DlnaTransportState {
     kUnknown,
     kStopped,
+    kNoMediaPresent,
     kPlaying,
     kPaused,
     kTransitioning,
