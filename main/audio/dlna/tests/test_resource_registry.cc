@@ -86,5 +86,43 @@ int main() {
         assert(registry.GetLiveCount() == 0);
     }
 
+    {
+        // A retired resource with an outstanding HTTP lease must not block
+        // reuse of the other registry slot. Once its final lease is released,
+        // that slot must become available again as well.
+        DlnaResourceRegistry registry;
+        std::string pinned_path;
+        std::string reusable_path;
+        std::string replacement_path;
+        assert(registry.Publish(11, 1, MakeWav(), 44, pinned_path));
+        assert(registry.Publish(11, 2, MakeWav(), 44, reusable_path));
+
+        DlnaResourceView pinned{};
+        assert(registry.Acquire(pinned_path, pinned));
+        registry.Retire(pinned_path);
+        assert(registry.GetLiveCount() == 2);
+
+        // The unpinned second entry can be retired and reused immediately.
+        registry.Retire(reusable_path);
+        assert(registry.GetLiveCount() == 1);
+        assert(registry.Publish(11, 3, MakeWav(), 44, replacement_path));
+        assert(replacement_path == "/dlna/11/3.wav");
+        assert(registry.GetLiveCount() == 2);
+
+        // The pinned entry remains unavailable until its HTTP handler releases.
+        auto* blocked = MakeWav();
+        std::string blocked_path;
+        assert(!registry.Publish(11, 4, blocked, 44, blocked_path));
+        std::free(blocked);
+
+        registry.Release(pinned.lease_id);
+        assert(registry.GetLiveCount() == 1);
+        assert(registry.Publish(11, 5, MakeWav(), 44, blocked_path));
+        assert(blocked_path == "/dlna/11/5.wav");
+        assert(registry.GetLiveCount() == 2);
+        registry.RetireAll();
+        assert(registry.GetLiveCount() == 0);
+    }
+
     return 0;
 }
