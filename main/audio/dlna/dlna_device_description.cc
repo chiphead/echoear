@@ -174,9 +174,66 @@ bool DlnaDeviceDescription::FetchAndParse(DlnaRenderer& renderer, uint32_t timeo
                 ? renderer.location : ResolveUrl(renderer.location, url_base);
             renderer.av_transport_control_url = ResolveUrl(
                 resolved_base, Element(service, "controlURL"));
+            renderer.av_transport_scpd_url = ResolveUrl(
+                resolved_base, Element(service, "SCPDURL"));
             break;
         }
         service_pos = service_end + std::strlen("</service>");
+    }
+
+    // The SCPD action list is the renderer's advertised capability contract.
+    // Treat a missing/unavailable SCPD as "unsupported" rather than guessing.
+    if (!renderer.av_transport_scpd_url.empty()) {
+        HttpBody scpd_body;
+        esp_http_client_config_t scpd_config{};
+        scpd_config.url = renderer.av_transport_scpd_url.c_str();
+        scpd_config.timeout_ms = static_cast<int>(timeout_ms);
+        scpd_config.event_handler = HttpEvent;
+        scpd_config.user_data = &scpd_body;
+        scpd_config.buffer_size = 2048;
+        scpd_config.buffer_size_tx = 1024;
+        scpd_config.disable_auto_redirect = false;
+
+        esp_http_client_handle_t scpd_client = esp_http_client_init(&scpd_config);
+        if (scpd_client != nullptr) {
+            const esp_err_t scpd_err = esp_http_client_perform(scpd_client);
+            const int scpd_status = esp_http_client_get_status_code(scpd_client);
+            esp_http_client_cleanup(scpd_client);
+            if (scpd_err == ESP_OK && scpd_status >= 200 && scpd_status < 300 &&
+                !scpd_body.overflow && !scpd_body.data.empty()) {
+                size_t action_pos = 0;
+                while ((action_pos = scpd_body.data.find("<action", action_pos)) !=
+                       std::string::npos) {
+                    const size_t name_end = action_pos + std::strlen("<action");
+                    if (name_end < scpd_body.data.size() &&
+                        (std::isalnum(static_cast<unsigned char>(scpd_body.data[name_end])) ||
+                         scpd_body.data[name_end] == '_' || scpd_body.data[name_end] == ':' ||
+                         scpd_body.data[name_end] == '-')) {
+                        action_pos = name_end;
+                        continue;
+                    }
+                    const size_t action_end = scpd_body.data.find("</action>", name_end);
+                    if (action_end == std::string::npos) break;
+                    const std::string action = scpd_body.data.substr(
+                        action_pos, action_end - action_pos);
+                    if (Element(action, "name") == "SetNextAVTransportURI") {
+                        renderer.supports_set_next_av_transport_uri = true;
+                        break;
+                    }
+                    action_pos = action_end + std::strlen("</action>");
+                }
+                ESP_LOGI(kTag, "AVTransport SCPD: SetNextAVTransportURI=%s",
+                         renderer.supports_set_next_av_transport_uri ? "yes" : "no");
+            } else {
+                ESP_LOGW(kTag, "AVTransport SCPD unavailable: err=%s HTTP=%d bytes=%u overflow=%d",
+                         esp_err_to_name(scpd_err), scpd_status,
+                         static_cast<unsigned>(scpd_body.data.size()), scpd_body.overflow);
+            }
+        } else {
+            ESP_LOGW(kTag, "Could not initialize AVTransport SCPD HTTP client");
+        }
+    } else {
+        ESP_LOGW(kTag, "AVTransport SCPDURL missing; next-resource capability is unknown");
     }
 
     if (renderer.av_transport_service_type.empty() ||
