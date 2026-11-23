@@ -338,17 +338,25 @@ void AudioService::AudioOutputTask() {
         audio_queue_cv_.notify_all();
         lock.unlock();
 
-        if (!codec_->output_enabled()) {
-            esp_timer_stop(audio_power_timer_);
-            esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
-            codec_->EnableOutput(true);
-        }
-
         if (task.playback_id != 0 && callbacks_.on_playback_progress) {
             callbacks_.on_playback_progress(task.playback_id, task.media_position_ms);
         }
 
-        codec_->OutputData(task.pcm);
+        // A selected network sink may consume the decoded PCM asynchronously.
+        // The callback must only enqueue/copy data; blocking network operations
+        // are forbidden on AudioOutputTask. If no sink handles the frame, retain
+        // the existing local codec output path.
+        const bool pcm_handled =
+            callbacks_.on_pcm_output &&
+            callbacks_.on_pcm_output(task.pcm, codec_->output_sample_rate());
+        if (!pcm_handled) {
+            if (!codec_->output_enabled()) {
+                esp_timer_stop(audio_power_timer_);
+                esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
+                codec_->EnableOutput(true);
+            }
+            codec_->OutputData(task.pcm);
+        }
 
         /* Update the last output time */
         last_output_time_ = std::chrono::steady_clock::now();
