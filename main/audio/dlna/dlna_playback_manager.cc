@@ -7,6 +7,7 @@
 #include <utility>
 
 #include <esp_heap_caps.h>
+#include <esp_timer.h>
 #include "esp_audio_types.h"
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
@@ -241,6 +242,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         new_utterance = true;
         utterance_decided_ = true;
         current_utterance_generation_ = utterance_generation_.load();
+        utterance_first_pcm_us_ = esp_timer_get_time();
         // sink_ready_ can briefly lag a disconnect/reconnect transition:
         // discovery may finish while NotifyNetworkDisconnected() is running.
         // Require the network session itself to be active before committing
@@ -420,6 +422,8 @@ bool DlnaPlaybackManager::QueueSegmentLocked(uint8_t index) {
     if (!buffers_[index].FinalizeWav(&resource.wav_data, &resource.wav_size)) return false;
     resource.buffer_index = index;
     resource.utterance_generation = current_utterance_generation_;
+    resource.first_pcm_us = utterance_first_pcm_us_;
+    resource.finalized_us = esp_timer_get_time();
     buffer_ready_[index] = false;
     buffer_active_[index] = false;
     const uint32_t byte_rate = static_cast<uint32_t>(resource.wav_data[28]) |
@@ -432,6 +436,10 @@ bool DlnaPlaybackManager::QueueSegmentLocked(uint8_t index) {
         (static_cast<uint32_t>(resource.wav_data[43]) << 24);
     resource.duration_ms = byte_rate == 0 ? 0 : static_cast<uint32_t>(
         (static_cast<uint64_t>(pcm_bytes) * 1000) / byte_rate);
+    ESP_LOGI(kTag, "Timing segment finalized: pcm_to_finalize=%lldms duration=%ums bytes=%u",
+             static_cast<long long>((resource.finalized_us - resource.first_pcm_us) / 1000),
+             static_cast<unsigned>(resource.duration_ms),
+             static_cast<unsigned>(resource.wav_size));
     if (xQueueSend(resource_queue_, &resource, 0) != pdTRUE) {
         heap_caps_free(resource.wav_data);
         recycle_mask_.fetch_or(1u << index);
@@ -563,6 +571,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         uint32_t duration_ms = 0;
         bool observed_playing = false;
         bool published = false;
+        bool playback_start_logged = false;
         bool next_action_attempted = false;
         bool next_action_maybe_accepted = false;
         TickType_t next_action_maybe_accepted_at = 0;
@@ -650,8 +659,14 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         resource_registry_.Retire(current.path);
         return;
     }
-    if (!DlnaControl::SetUriAndPlay(renderer_, current.uri,
-                                    "EchoEar audio", kControlTimeoutMs)) {
+    const int64_t control_started_us = esp_timer_get_time();
+    const bool start_accepted = DlnaControl::SetUriAndPlay(
+        renderer_, current.uri, "EchoEar audio", kControlTimeoutMs);
+    const int64_t control_finished_us = esp_timer_get_time();
+    ESP_LOGI(kTag, "Timing SetUriAndPlay: control=%lldms pcm_to_play_response=%lldms",
+             static_cast<long long>((control_finished_us - control_started_us) / 1000),
+             static_cast<long long>((control_finished_us - current.resource.first_pcm_us) / 1000));
+    if (!start_accepted) {
         // SetUriAndPlay() is a two-step operation. SetAVTransportURI may have
         // succeeded even when the subsequent Play request timed out, so the
         // renderer may still fetch this resource after the caller sees failure.
@@ -672,6 +687,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         return;
     }
     current.started = xTaskGetTickCount();
+    current.resource.finalized_us = current.resource.finalized_us;
     ESP_LOGI(kTag, "Started DLNA item %s (%u ms)",
              current.uri.c_str(), current.duration_ms);
 
@@ -748,6 +764,13 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         DlnaTransportState transport = DlnaTransportState::kUnknown;
         const bool state_ok = DlnaControl::GetTransportState(renderer_, transport, 1500);
         if (state_ok && transport == DlnaTransportState::kPlaying) {
+            if (!current.playback_start_logged) {
+                current.playback_start_logged = true;
+                const int64_t playing_observed_us = esp_timer_get_time();
+                ESP_LOGI(kTag, "Timing renderer PLAYING observed: pcm_to_playing=%lldms play_response_to_playing=%lldms",
+                         static_cast<long long>((playing_observed_us - current.resource.first_pcm_us) / 1000),
+                         static_cast<long long>((playing_observed_us - control_finished_us) / 1000));
+            }
             current.observed_playing = true;
             stopped_since = 0;
         }
