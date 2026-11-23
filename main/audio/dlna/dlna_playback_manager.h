@@ -28,6 +28,7 @@ public:
     DlnaPlaybackManager& operator=(const DlnaPlaybackManager&) = delete;
 
     bool Start(const std::string& host_ipv4);
+    void NotifyNetworkDisconnected();
     bool WritePcm(const int16_t* samples, size_t sample_count,
                   int sample_rate, int channels);
     void EndUtterance();
@@ -53,6 +54,7 @@ private:
     bool utterance_decided_ = false;
     bool fallback_utterance_ = false;
     std::mutex buffer_mutex_;
+    std::mutex state_mutex_;
 
     QueueHandle_t resource_queue_ = nullptr;
     TaskHandle_t worker_task_ = nullptr;
@@ -60,6 +62,8 @@ private:
     DlnaRenderer renderer_;
     bool renderer_ready_ = false;
     std::atomic<bool> sink_ready_{false};
+    std::atomic<bool> network_available_{false};
+    std::atomic<bool> network_lost_{false};
 
     DlnaMediaServer media_server_;
     uint8_t* current_wav_ = nullptr;
