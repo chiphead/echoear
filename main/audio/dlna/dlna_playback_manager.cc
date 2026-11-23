@@ -120,6 +120,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
     if (utterance_decided_ && fallback_utterance_) return false;
     if (!utterance_decided_) {
         utterance_decided_ = true;
+        current_utterance_generation_ = utterance_generation_.load();
         if (resource_queue_ == nullptr || !sink_ready_.load()) {
             fallback_utterance_ = true;
             return false;
@@ -213,6 +214,7 @@ bool DlnaPlaybackManager::QueueSegmentLocked(uint8_t index) {
     Resource resource{};
     if (!buffers_[index].FinalizeWav(&resource.wav_data, &resource.wav_size)) return false;
     resource.buffer_index = index;
+    resource.utterance_generation = current_utterance_generation_;
     buffer_ready_[index] = false;
     buffer_active_[index] = false;
     if (xQueueSend(resource_queue_, &resource, 0) != pdTRUE) {
@@ -264,6 +266,7 @@ void DlnaPlaybackManager::EndUtterance() {
 }
 
 void DlnaPlaybackManager::AbortUtterance() {
+    utterance_generation_.fetch_add(1);
     std::lock_guard<std::mutex> lock(buffer_mutex_);
     // A frame may already be in AudioOutputTask but not yet have reached the
     // PCM callback. Consume/discard frames until AudioService reports drain.
@@ -309,7 +312,8 @@ bool DlnaPlaybackManager::FindSonyRenderer(DlnaRenderer& renderer) {
 }
 
 
-void DlnaPlaybackManager::WaitForPlaybackCompletion(size_t wav_size) {
+void DlnaPlaybackManager::WaitForPlaybackCompletion(size_t wav_size,
+                                                     uint32_t utterance_generation) {
     // Canonical PCM WAV fields: byte rate at offset 28, data size at offset 40.
     // The buffer is still owned by current_wav_ while this method runs.
     uint32_t byte_rate = 0;
@@ -334,7 +338,8 @@ void DlnaPlaybackManager::WaitForPlaybackCompletion(size_t wav_size) {
 
     ESP_LOGI(kTag, "Tracking renderer playback (estimated duration=%u ms)", duration_ms);
     while (!stopping_.load() && network_available_.load() &&
-           !network_lost_.load()) {
+           !network_lost_.load() &&
+           utterance_generation_.load() == utterance_generation) {
         vTaskDelay(pdMS_TO_TICKS(750));
         if (stopping_.load() || !network_available_.load() || network_lost_.load()) break;
 
@@ -366,6 +371,12 @@ void DlnaPlaybackManager::WaitForPlaybackCompletion(size_t wav_size) {
 
 void DlnaPlaybackManager::ProcessResource(const Resource& resource) {
     if (resource.wav_data == nullptr || resource.wav_size == 0) return;
+
+    if (resource.utterance_generation != utterance_generation_.load()) {
+        heap_caps_free(resource.wav_data);
+        ESP_LOGI(kTag, "Skipping queued segment from an aborted utterance");
+        return;
+    }
 
     if (!renderer_ready_) {
         heap_caps_free(resource.wav_data);
@@ -406,16 +417,26 @@ void DlnaPlaybackManager::ProcessResource(const Resource& resource) {
         return;
     }
 
+    if (resource.utterance_generation != utterance_generation_.load()) {
+        DlnaControl::Stop(renderer_, kControlTimeoutMs);
+        media_server_.Stop();
+        heap_caps_free(resource.wav_data);
+        return;
+    }
+
     // Keep this allocation immutable and alive while the renderer may issue
-    // GET/Range requests. It is released only when a later utterance replaces it.
+    // GET/Range requests. It is released only when playback completes or aborts.
     current_wav_ = resource.wav_data;
     ESP_LOGI(kTag, "DLNA playback command accepted (%u bytes)",
              static_cast<unsigned>(resource.wav_size));
 
     // Keep the HTTP resource alive until AVTransport reports STOPPED, or a
     // duration-based safety deadline expires when the renderer lacks state support.
-    WaitForPlaybackCompletion(resource.wav_size);
+    WaitForPlaybackCompletion(resource.wav_size, resource.utterance_generation);
 
+    if (resource.utterance_generation != utterance_generation_.load()) {
+        DlnaControl::Stop(renderer_, kControlTimeoutMs);
+    }
     if (media_server_.IsRunning()) media_server_.Stop();
     if (current_wav_ != nullptr) {
         heap_caps_free(current_wav_);
