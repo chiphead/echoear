@@ -13,9 +13,9 @@
  */
 class DlnaPcmBuffer {
 public:
-    // 64 KiB is about 1.0 s of 32 kHz mono PCM16, reducing first-segment
-    // latency while retaining enough data for reliable HTTP/DLNA playback.
-    explicit DlnaPcmBuffer(size_t max_pcm_bytes = 64 * 1024);
+    // Preserve the original utterance-sized WAV behavior: 512 KiB holds about
+    // 8.2 seconds of 32 kHz mono PCM16 before a bounded rollover is needed.
+    explicit DlnaPcmBuffer(size_t max_pcm_bytes = 512 * 1024);
     ~DlnaPcmBuffer();
 
     DlnaPcmBuffer(const DlnaPcmBuffer&) = delete;
