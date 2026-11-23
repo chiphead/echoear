@@ -68,6 +68,12 @@ does not prove that the speaker produced audible sound. Confirm playback by
 listening to the SRS-X88 and checking the serial logs. The test runs in a worker
 task and does not intercept TTS PCM or alter the local ES8311 audio path.
 
+## Continuous-streaming investigation
+
+The SRS-X88 Help Guide documents playback of music stored on a DLNA server and lists supported file formats, but it does not specify support for progressive/infinite HTTP resources, HTTP chunked transfer encoding, unknown-length WAV streams, or append-only resources. The existing renderer integration therefore continues to use finite WAV resources with explicit lengths. A continuous HTTP stream must remain an experimental, separately validated transport path until the X88's actual HTTP request behavior is observed; do not replace the finite-resource path based only on generic HTTP or DLNA assumptions.
+
+The current 512 KiB segment size is a memory/latency compromise, not a claim that the X88 supports gapless transitions between separate AVTransport resources. The controller currently issues a new `SetAVTransportURI` and `Play` for every segment, so a transition gap is expected.
+
 ## Current limitations
 
 - SSDP discovery, UPnP device-description parsing, AVTransport SOAP control, the WAV HTTP endpoint, and the integrated PCM routing path are implemented. SOAP control and media delivery are not yet validated against a physical SRS-X88.
