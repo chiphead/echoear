@@ -168,3 +168,6 @@ A standalone host test is available at `scripts/tests/test_dlna_resource_registr
 ## SOAP XML helper regression coverage
 
 AVTransport SOAP escaping and response extraction now share the header-only `dlna_xml.h` helper. Host tests cover all five predefined XML entities, namespaced and unprefixed elements, URI query ampersands, missing/malformed/empty elements, and one-pass entity decoding. `SetNextAVTransportURI` DIDL-Lite metadata was also corrected to use normal XML attribute quoting (without literal backslashes), matching the initial `SetAVTransportURI` metadata structure. Both the registry ownership suite and XML helper suite run under AddressSanitizer and UndefinedBehaviorSanitizer in the dedicated host-test workflow.
+
+- Current and next AVTransport items now share one tested `BuildDidlMetadata()` implementation, preventing their DIDL-Lite serialization from drifting. Regression tests assert valid quoted XML attributes, no literal backslashes, and correct escaping of title and media URI.
+- If the playback watchdog expires without a confirmed STOPPED state and there is no next item to replace the current one, the manager explicitly sends Stop before retiring the last resource. If Stop itself fails, it disables the sink, stops the HTTP server, and retires the registry rather than silently assuming playback ended.
