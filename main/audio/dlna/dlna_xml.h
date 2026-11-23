@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdio>
+#include <cstdint>
 #include <string>
 #include <utility>
 
@@ -22,8 +24,16 @@ inline std::string Escape(const std::string& value) {
 }
 
 inline std::string BuildDidlMetadata(const std::string& media_uri,
-                                       const std::string& title) {
+                                       const std::string& title,
+                                       uint32_t duration_ms) {
     const std::string safe_title = title.empty() ? "EchoEar audio" : title;
+    const uint32_t total_seconds = duration_ms / 1000;
+    char duration[24] = {};
+    std::snprintf(duration, sizeof(duration), "%02u:%02u:%02u.%03u",
+                  static_cast<unsigned>(total_seconds / 3600),
+                  static_cast<unsigned>((total_seconds / 60) % 60),
+                  static_cast<unsigned>(total_seconds % 60),
+                  static_cast<unsigned>(duration_ms % 1000));
     return
         "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" "
         "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" "
@@ -31,8 +41,9 @@ inline std::string BuildDidlMetadata(const std::string& media_uri,
         "<item id=\"0\" parentID=\"-1\" restricted=\"1\">"
         "<dc:title>" + Escape(safe_title) + "</dc:title>"
         "<upnp:class>object.item.audioItem.musicTrack</upnp:class>"
-        "<res protocolInfo=\"http-get:*:audio/wav:*\">" +
-        Escape(media_uri) + "</res></item></DIDL-Lite>";
+        "<res protocolInfo=\"http-get:*:audio/wav:*\" duration=\"" +
+        std::string(duration) + "\">" + Escape(media_uri) +
+        "</res></item></DIDL-Lite>";
 }
 
 inline std::string Unescape(std::string value) {
