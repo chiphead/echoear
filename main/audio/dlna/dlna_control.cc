@@ -192,6 +192,22 @@ bool DlnaControl::GetPositionInfo(const DlnaRenderer& renderer,
                  duration_ok, relative_time_ok, track_uri_ok);
         return false;
     }
+
+    // A successful SOAP response with zero timestamps is ambiguous: some
+    // renderers really report 00:00:00, while malformed/nested XML can also
+    // defeat a lightweight field extractor. Preserve a bounded raw sample so
+    // device behavior can be distinguished from a parsing problem.
+    if (track_duration == "00:00:00" || relative_time == "00:00:00" ||
+        relative_time == "0:00:00") {
+        constexpr size_t kDiagnosticResponseBytes = 1200;
+        const size_t logged_length =
+            std::min(response.size(), kDiagnosticResponseBytes);
+        ESP_LOGW(kTag,
+                 "GetPositionInfo returned zero time field(s): duration=%s rel_time=%s response_bytes=%u response=%.*s",
+                 track_duration.c_str(), relative_time.c_str(),
+                 static_cast<unsigned>(response.size()),
+                 static_cast<int>(logged_length), response.c_str());
+    }
     return true;
 }
 
