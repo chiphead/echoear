@@ -99,3 +99,13 @@ Each iteration performs bounded work: process disconnect/abort flags, retire eli
 ## Current status
 
 The existing implementation has SCPD capability detection but still uses a single-resource server and a blocking sequential worker. This document deliberately does not claim gapless playback or enable `SetNextAVTransportURI`. The ESP-IDF build and physical SRS-X88 behavior remain unverified.
+
+## Implementation progress
+
+- Added `DlnaResourceRegistry` as a bounded two-entry ownership primitive.
+- `Publish()` transfers WAV-buffer ownership only on success and creates a generation/sequence URL path.
+- `Acquire()/Release()` protect bytes while an HTTP handler is reading them.
+- `Retire()` prevents new acquisitions and defers freeing until outstanding leases reach zero.
+- The new source is included only in the Waveshare 1.32 DLNA board build.
+
+This is the first isolated implementation step. The registry is not yet connected to `DlnaMediaServer` or `DlnaPlaybackManager`; the existing single-resource playback behavior remains unchanged. The server integration must ensure its HTTPD task has stopped and all handler leases have been released before the registry is destroyed.
