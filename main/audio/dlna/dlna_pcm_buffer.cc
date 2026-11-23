@@ -39,9 +39,11 @@ bool DlnaPcmBuffer::Initialize() {
     if (pcm_data_ != nullptr) return true;
     if (max_pcm_bytes_ == 0 || max_pcm_bytes_ > UINT32_MAX - 44) return false;
 
+    bool allocated_in_psram = true;
     pcm_data_ = static_cast<uint8_t*>(
         heap_caps_malloc(kWavHeaderSize + max_pcm_bytes_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (pcm_data_ == nullptr) {
+        allocated_in_psram = false;
         pcm_data_ = static_cast<uint8_t*>(
             heap_caps_malloc(kWavHeaderSize + max_pcm_bytes_, MALLOC_CAP_8BIT));
     }
@@ -50,6 +52,9 @@ bool DlnaPcmBuffer::Initialize() {
                  static_cast<unsigned>(max_pcm_bytes_));
         return false;
     }
+    ESP_LOGI(kTag, "Allocated %u-byte PCM buffer in %s",
+             static_cast<unsigned>(kWavHeaderSize + max_pcm_bytes_),
+             allocated_in_psram ? "PSRAM" : "8-bit heap fallback");
     return true;
 }
 
