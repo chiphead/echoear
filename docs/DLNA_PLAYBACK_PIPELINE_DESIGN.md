@@ -2,19 +2,11 @@
 
 ## Purpose
 
-This document defines the next playback-manager architecture needed to reduce the gap between finite WAV segments without weakening the existing resource-lifetime guarantees. It is a design boundary, not a claim that the Sony SRS-X88 supports gapless playback.
+This document records the implemented DLNA playback architecture and its remaining validation work. It is not a claim that the Sony SRS-X88 supports gapless playback; that still requires physical-device evidence.
 
 ## Why the current worker cannot preload
 
-The current worker calls `ProcessResource()`, which starts one HTTP endpoint, issues `SetAVTransportURI` + `Play`, then blocks in `WaitForPlaybackCompletion()`. While blocked, it cannot:
-
-- inspect the resource queue and prepare the next segment;
-- issue a next-resource SOAP action while the current item is playing;
-- service a renderer state machine independently from resource publication.
-
-The current `DlnaMediaServer` serves exactly one immutable WAV buffer at `/dlna/audio.wav`. Its caller owns that buffer and must retain it until `Stop()` returns. Replacing the pointer or stopping the server at a segment boundary is unsafe while the renderer may still be issuing GET or Range requests.
-
-Three PCM accumulators only absorb temporary delay. They do not make the worker concurrent and do not provide an unlimited stream.
+The current worker uses a persistent registry-backed HTTP server and a two-resource AVTransport window. `ProcessResource()` polls transport state while retaining the current WAV and preparing one look-ahead WAV. When the renderer advertises `SetNextAVTransportURI`, the worker attempts preloading and observes `CurrentURI` before retiring the previous resource. If preloading is unavailable, rejected, or not confirmed, it uses a sequential `SetAVTransportURI` + `Play` fallback. Three PCM accumulators and a bounded resource queue absorb temporary producer/consumer skew; they do not provide an unlimited stream. The legacy single-WAV media-server API remains available but is not the active playback path.
 
 ## Required capability gates
 
@@ -98,7 +90,7 @@ Each iteration performs bounded work: process disconnect/abort flags, retire eli
 
 ## Current status
 
-The existing implementation has SCPD capability detection but still uses a single-resource server and a blocking sequential worker. This document deliberately does not claim gapless playback or enable `SetNextAVTransportURI`. The ESP-IDF build and physical SRS-X88 behavior remain unverified.
+The implementation has SCPD capability detection, registry-backed multi-resource HTTP serving, a current-plus-next playback window, capability-gated `SetNextAVTransportURI`, sequential fallback, HTTP request telemetry, and bounded resource cleanup. It does not claim gapless playback. A complete ESP-IDF build and physical SRS-X88 behavior remain unverified.
 
 ## Implementation progress
 
@@ -108,7 +100,7 @@ The existing implementation has SCPD capability detection but still uses a singl
 - `Retire()` prevents new acquisitions and defers freeing until outstanding leases reach zero.
 - The new source is included only in the Waveshare 1.32 DLNA board build.
 
-This is the first isolated implementation step. The registry is not yet connected to `DlnaMediaServer` or `DlnaPlaybackManager`; the existing single-resource playback behavior remains unchanged. The server integration must ensure its HTTPD task has stopped and all handler leases have been released before the registry is destroyed.
+The registry is integrated with both `DlnaMediaServer` and `DlnaPlaybackManager`. HTTPD shutdown must complete before the registry is destroyed; if shutdown fails, the worker retains its context and retries rather than freeing memory that handlers may still reference.
 
 ## Multi-resource HTTP server implementation progress
 
@@ -119,7 +111,7 @@ This is the first isolated implementation step. The registry is not yet connecte
 - Unknown or retired paths return 404. Legacy single-WAV `Start(host, data, size)` remains available for the existing playback manager.
 - Registered WAV sizes are bounded to the signed response length accepted by the HTTP server API.
 
-The playback manager has not yet been switched to this overload. The current live playback path still starts/stops the legacy one-resource server per segment. The registry-backed overload is an isolated integration point; it does not yet provide concurrent preloading or gapless playback.
+The live playback manager uses this registry-backed overload. The server stays active across segments in one renderer/network session, enabling concurrent current/next URLs. This enables preloading but does not prove gapless playback.
 
 ## Playback manager integration progress
 
@@ -130,13 +122,13 @@ The playback manager has not yet been switched to this overload. The current liv
 - Playback completion retires the current resource without stopping the HTTP server. In-flight GET/HEAD/Range requests retain their leases, so bytes are freed only after request completion.
 - Network-loss and worker-shutdown paths stop HTTPD before retiring all resources. The manager's `current_wav_` is now a non-owning pointer used only to calculate the playback duration while the registry owns the allocation.
 
-This is persistent multi-URL serving with sequential AVTransport commands, not gapless playback. `ProcessResource()` still waits for the current item to finish before the worker dequeues the next item. The next engineering milestone remains a state-driven worker that can issue `SetNextAVTransportURI` while the current item is playing, gated by the SCPD capability probe and confirmed on the SRS-X88.
+This is persistent multi-URL serving with a current-plus-next AVTransport controller. The worker can issue `SetNextAVTransportURI` while the current item is playing when SCPD advertises support. The actual prefetch and transition behavior still requires SRS-X88 validation.
 
 ## SetNextAVTransportURI control groundwork
 
 - Added `DlnaControl::SetNextUri()`, including DIDL-Lite metadata and SOAP invocation.
 - The method refuses to send the action unless the parsed renderer SCPD explicitly advertised `SetNextAVTransportURI`.
-- This API is not yet called by the playback manager. The current worker remains sequential and continues using `SetAVTransportURI` + `Play` for each segment.
+- `SetNextUri()` is called by the playback manager only when the renderer SCPD explicitly advertises the action; rejected or unconfirmed transitions fall back to sequential playback.
 - The ESP-IDF 6.1 HTTP server implementation was checked: `httpd_stop()` waits until the HTTPD task reaches `THREAD_STOPPED` before deleting the server instance. The media server now preserves its handle/context if `httpd_stop()` reports failure rather than pretending handlers have exited.
 
 ## Current-next playback pipeline implementation
@@ -152,7 +144,7 @@ The playback manager has now been advanced beyond the earlier blocking sequentia
 
 This is now a capability-gated preloading implementation, but it is not yet a verified gapless implementation. The X88 may accept the action but fetch the next file too late, reject it during playback, or report its CurrentURI differently. Those behaviors require hardware validation. If URI observation fails, the conservative fallback may introduce a gap; it must not free the current resource early.
 
-The worker still handles at most one look-ahead item because the registry is deliberately bounded to two resources (current + next). Additional finalized segments remain in the bounded FreeRTOS queue until a slot becomes available. If the renderer holds an HTTP request open beyond the transition, a subsequent Publish can fail when both registry slots remain occupied; that path currently drops the queued segment rather than overwriting a live resource.
+The worker still handles at most one look-ahead item because the registry is deliberately bounded to two resources (current + next). Additional finalized segments remain in the bounded FreeRTOS queue until a slot becomes available. A failed Publish retains the unpublished next WAV and retries; after the current item completes, the completed URI is retired and the retry is bounded by the HTTP lease-drain window. No live resource is overwritten.
 
 - If the registry is temporarily full because an older retired resource still has an active HTTP lease, the manager retains the unpublished next WAV and retries publication. It does not overwrite a live resource or drop the queued segment merely because the old HTTP request has not drained. The completed current resource remains retained until publication can proceed.
 
@@ -163,7 +155,7 @@ The worker still handles at most one look-ahead item because the registry is del
 
 ## Host-side registry regression tests
 
-A standalone host test is available at `scripts/tests/test_dlna_resource_registry.py`. It compiles the production `dlna_resource_registry.cc` against minimal ESP heap/log stubs, then runs ownership and lease tests under AddressSanitizer and UndefinedBehaviorSanitizer. It covers independent leases, retirement while requests are active, capacity exhaustion, duplicate paths, lease-table exhaustion, and failed-Publish ownership semantics. Run it with `python3 scripts/tests/test_dlna_resource_registry.py` on a host with a C++ compiler; the dedicated `DLNA Host Tests` workflow runs the same command on pushes to this feature branch.
+A standalone host test is available at `scripts/tests/test_dlna_resource_registry.py`. It compiles the production `dlna_resource_registry.cc` against minimal ESP heap/log stubs, then runs ownership and lease tests under AddressSanitizer and UndefinedBehaviorSanitizer. It covers independent leases, retirement while requests are active, capacity exhaustion, duplicate paths, lease-table exhaustion, and failed-Publish ownership semantics. Run it with `python3 scripts/tests/test_dlna_resource_registry.py` on a host with a C++ compiler; the dedicated `DLNA Host Tests` workflow runs on feature-branch pushes that change DLNA source, test scripts, build configuration, or the workflow itself.
 
 ## SOAP XML helper regression coverage
 
@@ -185,3 +177,13 @@ AVTransport SOAP escaping and response extraction now share the header-only `dln
 
 
 - Transition handling now distinguishes a confirmed next-item URI from a confirmed PLAYING state. When `GetMediaInfo` reports the preloaded next URI but AVTransport is still `TRANSITIONING` (or temporarily reports STOPPED), the worker retains both WAV resources and allows up to 10 seconds from the accepted `SetNextAVTransportURI` action for the renderer to enter PLAYING. It no longer immediately overwrites an already-selected next URI with a second `SetAVTransportURI` merely because PLAYING has not appeared yet. If the renderer never starts the item within that bounded window, the existing sequential recovery remains available.
+
+
+## PCM segmentation and producer/consumer budget
+
+- The default PCM accumulator capacity is now 256 KiB per segment (excluding the 44-byte WAV header). At the fixed 32 kHz / 16-bit output format this represents approximately 4.096 seconds of mono audio or 2.048 seconds of stereo audio.
+- The previous 512 KiB default represented approximately 8.192 seconds mono / 4.096 seconds stereo. Halving the segment size reduces the amount of PCM accumulated before the first full segment is queued and reduces each detached WAV allocation, at the cost of more frequent AVTransport transitions.
+- This is a transport segmentation change only: sample rate, sample format, channel count, and PCM samples are unchanged. It does not reduce audio fidelity.
+- Each queued segment now logs its calculated duration and current resource-queue depth. Queue-full logs include the duration of the dropped segment, making producer/consumer imbalance visible in device logs.
+- The callback remains non-blocking with respect to network operations. It can still drop the remainder of an utterance if all three accumulators are occupied; the worker must consume and recycle segments quickly enough to keep pace with the real-time PCM producer.
+- A stalled-playback watchdog now sends Stop before sequential fallback unless a recently accepted next-item transition has already been observed. This prevents a timed-out current item from being overwritten while it may still be playing, while preserving the bounded transition grace period.
