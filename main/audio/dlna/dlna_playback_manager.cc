@@ -328,6 +328,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
             write_buffer_index_ = index;
             if (!buffers_[index].Begin(sample_rate, channels)) {
                 buffer_dropping_[index] = true;
+                callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
             buffer_active_[index] = true;
@@ -358,6 +359,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
             write_buffer_index_ = index;
             if (!buffers_[index].Begin(sample_rate, channels)) {
                 buffer_dropping_[index] = true;
+                callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
             buffer_active_[index] = true;
