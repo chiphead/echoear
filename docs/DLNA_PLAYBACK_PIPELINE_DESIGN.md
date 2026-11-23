@@ -155,7 +155,7 @@ The worker still handles at most one look-ahead item because the registry is del
 
 ## Host-side registry regression tests
 
-A standalone host test is available at `scripts/tests/test_dlna_resource_registry.py`. It compiles the production `dlna_resource_registry.cc` against minimal ESP heap/log stubs, then runs ownership and lease tests under AddressSanitizer and UndefinedBehaviorSanitizer. It covers independent leases, retirement while requests are active, capacity exhaustion, duplicate paths, lease-table exhaustion, and failed-Publish ownership semantics. Run it with `python3 scripts/tests/test_dlna_resource_registry.py` on a host with a C++ compiler; the dedicated `DLNA Host Tests` workflow runs on feature-branch pushes that change DLNA source, test scripts, build configuration, or the workflow itself.
+A standalone host test is available at `scripts/tests/test_dlna_resource_registry.py`. It compiles the production `dlna_resource_registry.cc` against minimal ESP heap/log stubs, then runs ownership and lease tests under AddressSanitizer and UndefinedBehaviorSanitizer. It covers independent leases, retirement while requests are active, capacity exhaustion, duplicate paths, lease-table exhaustion, and failed-Publish ownership semantics. Run it with `python3 scripts/tests/test_dlna_resource_registry.py` on a host with a C++ compiler; the dedicated `DLNA Host Tests` workflow runs only for matching pull requests or manual dispatch, not on feature-branch pushes.
 
 ## SOAP XML helper regression coverage
 
