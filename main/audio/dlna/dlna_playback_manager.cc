@@ -834,7 +834,39 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
 
 void DlnaPlaybackManager::Worker() {
     TickType_t next_discovery = 0;
+    TickType_t next_memory_report = xTaskGetTickCount();
     while (!stopping_.load()) {
+        // Report both free and largest contiguous blocks. Free bytes alone can
+        // hide fragmentation that prevents a 256 KiB segment from being recycled.
+        if (xTaskGetTickCount() >= next_memory_report) {
+            next_memory_report = xTaskGetTickCount() + pdMS_TO_TICKS(10000);
+            size_t ready_buffers = 0;
+            size_t active_buffers = 0;
+            {
+                std::lock_guard<std::mutex> lock(buffer_mutex_);
+                for (size_t i = 0; i < kBufferCount; ++i) {
+                    if (buffer_ready_[i]) ++ready_buffers;
+                    if (buffer_active_[i]) ++active_buffers;
+                }
+            }
+            const uint32_t psram_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+            const uint32_t internal_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+            ESP_LOGI(kTag,
+                     "Memory: PSRAM free=%u largest=%u min_free=%u; "
+                     "internal free=%u largest=%u min_free=%u; "
+                     "PCM buffers ready=%u active=%u; resources queued=%u live=%u",
+                     static_cast<unsigned>(heap_caps_get_free_size(psram_caps)),
+                     static_cast<unsigned>(heap_caps_get_largest_free_block(psram_caps)),
+                     static_cast<unsigned>(heap_caps_get_minimum_free_size(psram_caps)),
+                     static_cast<unsigned>(heap_caps_get_free_size(internal_caps)),
+                     static_cast<unsigned>(heap_caps_get_largest_free_block(internal_caps)),
+                     static_cast<unsigned>(heap_caps_get_minimum_free_size(internal_caps)),
+                     static_cast<unsigned>(ready_buffers),
+                     static_cast<unsigned>(active_buffers),
+                     static_cast<unsigned>(resource_queue_ != nullptr
+                                               ? uxQueueMessagesWaiting(resource_queue_) : 0),
+                     static_cast<unsigned>(resource_registry_.GetLiveCount()));
+        }
         {
             std::lock_guard<std::mutex> lock(buffer_mutex_);
             if (end_pending_ &&
