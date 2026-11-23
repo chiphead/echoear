@@ -1190,7 +1190,7 @@ config DLNA_AUDIO_OUTPUT
 
 config DLNA_SONY_X88_SMOKE_TEST
     bool "Run Sony SRS-X88 DLNA WAV smoke test after Wi-Fi connects"
-    depends on BOARD_TYPE_ECHOEAR_WAVESHARE_1_32
+    depends on BOARD_TYPE_ECHOEAR_WAVESHARE_1_32 && !DLNA_AUDIO_OUTPUT
     default n
     help
         Starts a one-shot worker after Wi-Fi connects. It discovers a Sony SRS-X88,
