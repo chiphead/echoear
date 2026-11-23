@@ -4,6 +4,9 @@
 #include <cstdint>
 #include <atomic>
 #include <mutex>
+#include <vector>
+
+#include "esp_ae_rate_cvt.h"
 
 #include <freertos/semphr.h>
 #include <string>
@@ -29,7 +32,7 @@ public:
     DlnaPlaybackManager(const DlnaPlaybackManager&) = delete;
     DlnaPlaybackManager& operator=(const DlnaPlaybackManager&) = delete;
 
-    bool Start(const std::string& host_ipv4);
+    bool Start(const std::string& host_ipv4, int source_sample_rate, int channels);
     void NotifyNetworkDisconnected();
     bool WritePcm(const int16_t* samples, size_t sample_count,
                   int sample_rate, int channels);
@@ -50,6 +53,7 @@ private:
     void ProcessResource(const Resource& resource);
     void WaitForPlaybackCompletion(size_t wav_size, uint32_t utterance_generation);
     bool QueueSegmentLocked(uint8_t index);
+    bool InitializeResampler(int source_sample_rate, int channels);
 
     static constexpr size_t kBufferCount = 2;
     DlnaPcmBuffer buffers_[kBufferCount];
@@ -64,6 +68,13 @@ private:
     std::atomic<uint32_t> utterance_generation_{0};
     std::mutex buffer_mutex_;
     std::mutex state_mutex_;
+
+    static constexpr int kDlnaSampleRate = 32000;
+    esp_ae_rate_cvt_handle_t resampler_ = nullptr;
+    int resampler_source_rate_ = 0;
+    int resampler_channels_ = 0;
+    bool output_format_ready_ = false;
+    std::vector<int16_t> resampled_pcm_;
 
     QueueHandle_t resource_queue_ = nullptr;
     TaskHandle_t worker_task_ = nullptr;
