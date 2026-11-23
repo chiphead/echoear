@@ -79,6 +79,8 @@ private:
     TickType_t end_pending_tick_ = 0;
     static constexpr uint32_t kEndSilenceGraceMs = 200;
     uint32_t current_utterance_generation_ = 0;
+    // Monotonic timestamp of the first PCM callback in the current utterance.
+    int64_t utterance_first_pcm_us_ = 0;
     std::atomic<uint32_t> utterance_generation_{0};
     std::mutex buffer_mutex_;
     std::mutex state_mutex_;
