@@ -207,7 +207,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
     if (samples == nullptr || sample_count == 0) return false;
 
     std::lock_guard<std::mutex> lock(buffer_mutex_);
-    if (discard_until_drain_) return true;
+    if (discard_until_drain_ || utterance_dropping_) return true;
     if (end_pending_) {
         const TickType_t silence_ticks = pdMS_TO_TICKS(kEndSilenceGraceMs);
         if ((xTaskGetTickCount() - end_pending_tick_) >= silence_ticks) {
@@ -224,6 +224,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         sample_count % static_cast<size_t>(channels) != 0) {
         if (utterance_decided_ && !fallback_utterance_) {
             buffer_dropping_[write_buffer_index_] = true;
+            utterance_dropping_ = true;
             callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
             return true;
         }
@@ -248,6 +249,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         // Once an utterance has started on DLNA, never send a later frame to
         // the local codec: discard its tail instead of splitting the output.
         buffer_dropping_[write_buffer_index_] = true;
+        utterance_dropping_ = true;
         return true;
     };
 
@@ -299,6 +301,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         } else {
             if (!new_utterance) {
                 buffer_dropping_[index] = true;
+                utterance_dropping_ = true;
                 callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
@@ -328,12 +331,14 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         if (aligned_remaining == 0) {
             if (!QueueSegmentLocked(index)) {
                 buffer_dropping_[index] = true;
+                utterance_dropping_ = true;
                 callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
             const int available = FindReadyBufferLocked(index);
             if (available < 0) {
                 buffer_dropping_[index] = true;
+                utterance_dropping_ = true;
                 callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
@@ -341,6 +346,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
             write_buffer_index_ = index;
             if (!buffers_[index].Begin(sample_rate, channels)) {
                 buffer_dropping_[index] = true;
+                utterance_dropping_ = true;
                 callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
@@ -351,6 +357,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         const size_t chunk_samples = std::min(output_sample_count - offset, aligned_remaining);
         if (!buffers_[index].Append(output_samples + offset, chunk_samples)) {
             buffer_dropping_[index] = true;
+            utterance_dropping_ = true;
             callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
             return true;
         }
@@ -359,12 +366,14 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         if (offset < output_sample_count) {
             if (!QueueSegmentLocked(index)) {
                 buffer_dropping_[index] = true;
+                utterance_dropping_ = true;
                 callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
             const int available = FindReadyBufferLocked(index);
             if (available < 0) {
                 buffer_dropping_[index] = true;
+                utterance_dropping_ = true;
                 callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
@@ -372,6 +381,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
             write_buffer_index_ = index;
             if (!buffers_[index].Begin(sample_rate, channels)) {
                 buffer_dropping_[index] = true;
+                utterance_dropping_ = true;
                 callback_issue_count_.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
@@ -421,6 +431,7 @@ bool DlnaPlaybackManager::QueueSegmentLocked(uint8_t index) {
 void DlnaPlaybackManager::EndUtterance() {
     std::lock_guard<std::mutex> lock(buffer_mutex_);
     if (discard_until_drain_) {
+        utterance_dropping_ = false;
         const uint8_t index = write_buffer_index_;
         buffers_[index].Reset();
         buffer_active_[index] = false;
@@ -433,6 +444,7 @@ void DlnaPlaybackManager::EndUtterance() {
         return;
     }
     if (fallback_utterance_) {
+        utterance_dropping_ = false;
         fallback_utterance_ = false;
         utterance_decided_ = false;
         end_pending_ = false;
@@ -453,7 +465,8 @@ void DlnaPlaybackManager::FinalizePendingUtteranceLocked() {
     if (resampler_ != nullptr) esp_ae_rate_cvt_reset(resampler_);
 
     const uint8_t index = write_buffer_index_;
-    if (buffer_dropping_[index]) {
+    if (utterance_dropping_ || buffer_dropping_[index]) {
+        if (buffer_ready_[index]) buffers_[index].Reset();
         if (buffer_ready_[index]) buffers_[index].Reset();
         buffer_active_[index] = false;
         buffer_dropping_[index] = false;
@@ -466,6 +479,7 @@ void DlnaPlaybackManager::FinalizePendingUtteranceLocked() {
 
     utterance_decided_ = false;
     fallback_utterance_ = false;
+    utterance_dropping_ = false;
     const int available = FindReadyBufferLocked(index);
     if (available >= 0) write_buffer_index_ = static_cast<uint8_t>(available);
 }
@@ -477,6 +491,7 @@ void DlnaPlaybackManager::AbortUtterance() {
     // A frame may already be in AudioOutputTask but not yet have reached the
     // PCM callback. Consume/discard frames until AudioService reports drain.
     discard_until_drain_ = true;
+    utterance_dropping_ = false;
     end_pending_ = false;
     const uint8_t index = write_buffer_index_;
     buffers_[index].Reset();
