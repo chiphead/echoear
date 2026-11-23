@@ -199,7 +199,14 @@ bool DlnaMediaServer::Start(const std::string& host_ipv4,
 
 void DlnaMediaServer::Stop() {
     if (server_ != nullptr) {
-        httpd_stop(server_);
+        const esp_err_t stop_result = httpd_stop(server_);
+        if (stop_result != ESP_OK) {
+            // Keep the handle/context intact: a failed stop must not make the
+            // caller believe handlers have exited and free their registry.
+            ESP_LOGE(kTag, "HTTP server stop failed (%s); retaining server context",
+                     esp_err_to_name(stop_result));
+            return;
+        }
         server_ = nullptr;
     }
     registry_ = nullptr;
