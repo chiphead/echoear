@@ -30,7 +30,7 @@ The manager installs the AudioService PCM callback for the complete decoded play
 
 The manager keeps the current WAV allocation alive while the renderer may fetch it. When a new utterance replaces the current one, it first sends best-effort AVTransport Stop, stops the old HTTP server, and only then releases the previous WAV allocation. Wi-Fi disconnect disables the sink and schedules server/resource cleanup; reconnect updates the host address and triggers rediscovery.
 
-Each utterance keeps one output choice from its first PCM frame through drain: if DLNA is not ready or a buffer is unavailable at the beginning, the whole utterance stays on the local codec. If a DLNA-buffered utterance exceeds its configured limit, it is discarded rather than splitting the utterance between DLNA and local output. The current default is 512 KiB per PCM accumulator.
+Each utterance keeps one output choice from its first PCM frame through drain: if DLNA is not ready or a buffer is unavailable at the beginning, the whole utterance stays on the local codec. If a DLNA-buffered utterance exceeds its configured limit, it is discarded rather than splitting the utterance between DLNA and local output. The current default is 512 KiB per PCM accumulator, equivalent to roughly 10.9 seconds at 24 kHz / 16-bit mono. Longer uninterrupted utterances exceed this initial safety limit and are discarded; increasing the limit or adding segmented playback is a follow-up optimization.
 
 ## Current discovery API
 
