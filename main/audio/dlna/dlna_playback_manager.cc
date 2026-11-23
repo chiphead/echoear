@@ -841,6 +841,13 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                 next.next_action_attempted = true;
                 const bool next_action_response_ok = DlnaControl::SetNextUri(
                     renderer_, next.uri, "EchoEar audio", kControlTimeoutMs);
+                // The SOAP call can block while Wi-Fi disconnects. Do not run
+                // any further state/fallback logic for this generation after
+                // it returns; the common cleanup below will stop and retire it.
+                if (stopping_.load() || !network_available_.load() || network_lost_.load() ||
+                    current.resource.utterance_generation != utterance_generation_.load()) {
+                    break;
+                }
                 // A timeout/error response is ambiguous: the renderer may have
                 // accepted SetNextAVTransportURI before the SOAP response was lost.
                 // Observe CurrentURI in either case before deciding to overwrite it.
