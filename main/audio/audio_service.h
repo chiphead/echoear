@@ -86,6 +86,8 @@ struct AudioServiceCallbacks {
     std::function<void(void)> on_audio_testing_queue_full;
     // Fired when the decode/playback queues and their in-flight work are drained.
     std::function<void(void)> on_playback_drained;
+    // Fired when Stop/ResetDecoder discards queued or in-flight playback.
+    std::function<void(void)> on_playback_aborted;
     std::function<void(uint32_t playback_id, uint32_t media_position_ms)> on_playback_progress;
     // Optional non-blocking PCM sink. Return true when the frame was handled;
     // return false to use the default local codec output. Implementations must
