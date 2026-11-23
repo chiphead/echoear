@@ -24,6 +24,8 @@ def main() -> int:
             "-Wall",
             "-Wextra",
             "-Werror",
+            "-fsanitize=address,undefined",
+            "-fno-omit-frame-pointer",
             "-I",
             str(STUB_DIR),
             "-I",
