@@ -55,11 +55,13 @@ private:
     bool QueueSegmentLocked(uint8_t index);
     bool InitializeResampler(int source_sample_rate, int channels);
 
-    static constexpr size_t kBufferCount = 2;
+    // Three accumulators provide two queued look-ahead segments while the worker
+    // owns the currently playing immutable WAV resource.
+    static constexpr size_t kBufferCount = 3;
     DlnaPcmBuffer buffers_[kBufferCount];
-    bool buffer_ready_[kBufferCount] = {false, false};
-    bool buffer_active_[kBufferCount] = {false, false};
-    bool buffer_dropping_[kBufferCount] = {false, false};
+    bool buffer_ready_[kBufferCount] = {false, false, false};
+    bool buffer_active_[kBufferCount] = {false, false, false};
+    bool buffer_dropping_[kBufferCount] = {false, false, false};
     uint8_t write_buffer_index_ = 0;
     bool utterance_decided_ = false;
     bool fallback_utterance_ = false;
