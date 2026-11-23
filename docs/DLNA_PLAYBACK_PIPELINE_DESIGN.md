@@ -226,3 +226,12 @@ AVTransport SOAP escaping and response extraction now share the header-only `dln
 - This startup deadline is independent of the WAV duration, so a long resource cannot delay recovery for most of its playback time when the renderer never starts.
 - On startup expiry, the worker issues `Stop` before retiring the current WAV. If Stop fails, the existing conservative recovery path marks the network session lost and retains published resources until HTTPD has stopped.
 - The startup deadline is a defensive default, not a measured Sony SRS-X88 startup bound. Physical-device testing may justify tuning it.
+
+## External AVTransport takeover detection
+
+- After EchoEar has observed the current item in `PLAYING`, the worker checks `GetMediaInfo/CurrentURI` at a 3-second interval while the renderer remains `PLAYING` or `PAUSED`.
+- A single URI mismatch is not enough to declare takeover. Two consecutive successful URI queries must both report a URI that is neither the current EchoEar item nor, while a `SetNextAVTransportURI` transition is pending, the expected preloaded next item.
+- A failed `GetMediaInfo` query resets the mismatch confirmation count; transient SOAP failures are not interpreted as external control.
+- On confirmed takeover, the worker retires EchoEar's current and look-ahead URLs without sending `Stop`. This avoids interrupting content selected by another controller. Registry leases continue protecting any HTTP response already in flight; later requests to retired EchoEar URLs are rejected.
+- URI takeover detection is intentionally suspended before the first confirmed `PLAYING` state and while the renderer reports `STOPPED`/`TRANSITIONING`. Those states are handled by the existing startup, completion, and next-item transition logic.
+- The 3-second polling interval and two-query threshold are conservative software defaults, not measurements of Sony SRS-X88 response behavior. Physical-device validation remains outstanding.
