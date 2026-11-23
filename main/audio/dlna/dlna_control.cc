@@ -180,7 +180,7 @@ bool DlnaControl::Stop(const DlnaRenderer& renderer, uint32_t timeout_ms) {
 namespace {
 std::string XmlUnescape(std::string value) {
     const std::pair<const char*, const char*> entities[] = {
-        {"&quot;", "\\""}, {"&apos;", "'"}, {"&lt;", "<"},
+        {"&quot;", "\""}, {"&apos;", "'"}, {"&lt;", "<"},
         {"&gt;", ">"}, {"&amp;", "&"},
     };
     for (const auto& entity : entities) {
@@ -195,7 +195,7 @@ std::string XmlUnescape(std::string value) {
 }
 
 bool ExtractXmlValue(const std::string& xml, const char* tag, std::string& value) {
-    if (tag == nullptr || *tag == '\\0') return false;
+    if (tag == nullptr || *tag == '\0') return false;
     const std::string wanted(tag);
     size_t pos = 0;
     while ((pos = xml.find('<', pos)) != std::string::npos) {
@@ -205,7 +205,7 @@ bool ExtractXmlValue(const std::string& xml, const char* tag, std::string& value
             ++pos;
             continue;
         }
-        const size_t name_end = xml.find_first_of(" />\\t\\r\\n", name_begin);
+        const size_t name_end = xml.find_first_of(" />\t\r\n", name_begin);
         if (name_end == std::string::npos) return false;
         const std::string qualified = xml.substr(name_begin, name_end - name_begin);
         const size_t colon = qualified.rfind(':');
