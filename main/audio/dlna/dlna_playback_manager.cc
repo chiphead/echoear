@@ -116,6 +116,7 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
     if (samples == nullptr || sample_count == 0) return false;
 
     std::lock_guard<std::mutex> lock(buffer_mutex_);
+    if (discard_until_drain_) return true;
     if (utterance_decided_ && fallback_utterance_) return false;
     if (!utterance_decided_) {
         utterance_decided_ = true;
@@ -154,6 +155,16 @@ void DlnaPlaybackManager::EndUtterance() {
     {
         std::lock_guard<std::mutex> lock(buffer_mutex_);
         const uint8_t index = write_buffer_index_;
+        if (discard_until_drain_) {
+            buffers_[index].Reset();
+            buffer_active_[index] = false;
+            buffer_dropping_[index] = false;
+            fallback_utterance_ = false;
+            utterance_decided_ = false;
+            discard_until_drain_ = false;
+            ESP_LOGI(kTag, "Discarded interrupted DLNA utterance");
+            return;
+        }
         if (fallback_utterance_) {
             fallback_utterance_ = false;
             utterance_decided_ = false;
@@ -200,6 +211,19 @@ void DlnaPlaybackManager::EndUtterance() {
         recycle_mask_.fetch_or(1u << resource.buffer_index);
 
     }
+}
+
+void DlnaPlaybackManager::AbortUtterance() {
+    std::lock_guard<std::mutex> lock(buffer_mutex_);
+    // A frame may already be in AudioOutputTask but not yet have reached the
+    // PCM callback. Consume/discard frames until AudioService reports drain.
+    discard_until_drain_ = true;
+    const uint8_t index = write_buffer_index_;
+    buffers_[index].Reset();
+    buffer_active_[index] = false;
+    buffer_dropping_[index] = false;
+    fallback_utterance_ = false;
+    utterance_decided_ = false;
 }
 
 void DlnaPlaybackManager::WorkerEntry(void* arg) {
