@@ -1,4 +1,5 @@
 #include "dlna_control.h"
+#include "dlna_xml.h"
 
 #include <algorithm>
 #include <string>
@@ -30,21 +31,6 @@ esp_err_t HttpEvent(esp_http_client_event_t* event) {
     return ESP_OK;
 }
 
-std::string XmlEscape(const std::string& value) {
-    std::string escaped;
-    escaped.reserve(value.size());
-    for (char c : value) {
-        switch (c) {
-            case '&': escaped += "&amp;"; break;
-            case '<': escaped += "&lt;"; break;
-            case '>': escaped += "&gt;"; break;
-            case '"': escaped += "&quot;"; break;
-            case '\'': escaped += "&apos;"; break;
-            default: escaped += c; break;
-        }
-    }
-    return escaped;
-}
 
 bool Invoke(const DlnaRenderer& renderer, const char* action,
             const std::string& arguments, uint32_t timeout_ms,
@@ -62,7 +48,7 @@ bool Invoke(const DlnaRenderer& renderer, const char* action,
         "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" "
         "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
         "<s:Body><u:" + std::string(action) + " xmlns:u=\"" +
-        XmlEscape(renderer.av_transport_service_type) + "\">" +
+        DlnaXml::Escape(renderer.av_transport_service_type) + "\">" +
         arguments + "</u:" + action + "></s:Body></s:Envelope>";
 
     SoapResponse response;
@@ -179,53 +165,7 @@ bool DlnaControl::Stop(const DlnaRenderer& renderer, uint32_t timeout_ms) {
 }
 
 namespace {
-std::string XmlUnescape(std::string value) {
-    const std::pair<const char*, const char*> entities[] = {
-        {"&quot;", "\""}, {"&apos;", "'"}, {"&lt;", "<"},
-        {"&gt;", ">"}, {"&amp;", "&"},
-    };
-    for (const auto& entity : entities) {
-        size_t pos = 0;
-        while ((pos = value.find(entity.first, pos)) != std::string::npos) {
-            value.replace(pos, std::char_traits<char>::length(entity.first),
-                          entity.second);
-            pos += std::char_traits<char>::length(entity.second);
-        }
-    }
-    return value;
-}
 
-bool ExtractXmlValue(const std::string& xml, const char* tag, std::string& value) {
-    if (tag == nullptr || *tag == '\0') return false;
-    const std::string wanted(tag);
-    size_t pos = 0;
-    while ((pos = xml.find('<', pos)) != std::string::npos) {
-        const size_t name_begin = pos + 1;
-        if (name_begin >= xml.size() || xml[name_begin] == '/' ||
-            xml[name_begin] == '!' || xml[name_begin] == '?') {
-            ++pos;
-            continue;
-        }
-        const size_t name_end = xml.find_first_of(" />\t\r\n", name_begin);
-        if (name_end == std::string::npos) return false;
-        const std::string qualified = xml.substr(name_begin, name_end - name_begin);
-        const size_t colon = qualified.rfind(':');
-        const std::string local = colon == std::string::npos
-            ? qualified : qualified.substr(colon + 1);
-        if (local != wanted) {
-            pos = name_end;
-            continue;
-        }
-        const size_t open_end = xml.find('>', name_end);
-        if (open_end == std::string::npos) return false;
-        const std::string close = "</" + qualified + ">";
-        const size_t close_pos = xml.find(close, open_end + 1);
-        if (close_pos == std::string::npos) return false;
-        value = XmlUnescape(xml.substr(open_end + 1, close_pos - open_end - 1));
-        return !value.empty();
-    }
-    return false;
-}
 }  // namespace
 
 bool DlnaControl::GetCurrentUri(const DlnaRenderer& renderer,
@@ -237,7 +177,7 @@ bool DlnaControl::GetCurrentUri(const DlnaRenderer& renderer,
         uri.clear();
         return false;
     }
-    if (!ExtractXmlValue(response, "CurrentURI", uri)) {
+    if (!DlnaXml::ExtractValue(response, "CurrentURI", uri)) {
         uri.clear();
         return false;
     }
