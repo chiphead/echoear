@@ -175,13 +175,30 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
     std::lock_guard<std::mutex> lock(buffer_mutex_);
     if (discard_until_drain_) return true;
     if (utterance_decided_ && fallback_utterance_) return false;
+    bool new_utterance = false;
     if (!utterance_decided_) {
+        new_utterance = true;
         utterance_decided_ = true;
         current_utterance_generation_ = utterance_generation_.load();
         if (resource_queue_ == nullptr || !sink_ready_.load()) {
             fallback_utterance_ = true;
             return false;
         }
+    }
+    const auto reject_frame = [this, new_utterance]() {
+        if (new_utterance) {
+            fallback_utterance_ = true;
+            return false;
+        }
+        // Once an utterance has started on DLNA, never send a later frame to
+        // the local codec: discard its tail instead of splitting the output.
+        buffer_dropping_[write_buffer_index_] = true;
+        return true;
+    };
+
+    if (channels != resampler_channels_) {
+        ESP_LOGW(kTag, "PCM channel count changed during DLNA output");
+        return reject_frame();
     }
 
     // The SRS-X88 published network WAV/Linear PCM formats start at 32 kHz.
@@ -192,35 +209,31 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
     if (sample_rate != kDlnaSampleRate) {
         if (!output_format_ready_ || resampler_ == nullptr ||
             sample_rate != resampler_source_rate_ || channels != resampler_channels_) {
-            fallback_utterance_ = true;
-            ESP_LOGW(kTag, "Unsupported PCM input format %d Hz/%d ch; using local output",
+            ESP_LOGW(kTag, "Unsupported PCM input format %d Hz/%d ch",
                      sample_rate, channels);
-            return false;
+            return reject_frame();
         }
         uint32_t max_output_frames = 0;
         const uint32_t input_frames = static_cast<uint32_t>(sample_count / channels);
         if (esp_ae_rate_cvt_get_max_out_sample_num(resampler_, input_frames,
                                                    &max_output_frames) != ESP_AE_ERR_OK ||
             static_cast<size_t>(max_output_frames) * channels > resampled_pcm_.size()) {
-            fallback_utterance_ = true;
             ESP_LOGW(kTag, "PCM resampler output exceeds prepared frame capacity");
-            return false;
+            return reject_frame();
         }
         uint32_t actual_output_frames = max_output_frames;
         const auto convert_ret = esp_ae_rate_cvt_process(
             resampler_, (esp_ae_sample_t*)samples, input_frames,
             (esp_ae_sample_t*)resampled_pcm_.data(), &actual_output_frames);
         if (convert_ret != ESP_AE_ERR_OK || actual_output_frames == 0) {
-            fallback_utterance_ = true;
-            ESP_LOGW(kTag, "PCM resampling failed (%d); using local output", convert_ret);
-            return false;
+            ESP_LOGW(kTag, "PCM resampling failed (%d)", convert_ret);
+            return reject_frame();
         }
         output_samples = resampled_pcm_.data();
         output_sample_count = static_cast<size_t>(actual_output_frames) * channels;
         sample_rate = kDlnaSampleRate;
     } else if (!output_format_ready_) {
-        fallback_utterance_ = true;
-        return false;
+        return reject_frame();
     }
 
     uint8_t index = write_buffer_index_;
@@ -237,8 +250,8 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
     if (buffer_dropping_[index]) return true;
     if (!buffer_active_[index]) {
         if (!buffers_[index].Begin(sample_rate, channels)) {
-            fallback_utterance_ = true;
-            return false;
+            ESP_LOGE(kTag, "Could not begin DLNA PCM segment");
+            return reject_frame();
         }
         buffer_active_[index] = true;
     }
