@@ -121,11 +121,11 @@ bool DlnaControl::SetUriAndPlay(const DlnaRenderer& renderer,
         "<dc:title>" + DlnaXml::Escape(title.empty() ? "EchoEar audio" : title) + "</dc:title>"
         "<upnp:class>object.item.audioItem.musicTrack</upnp:class>"
         "<res protocolInfo=\"http-get:*:audio/wav:*\">" +
-        XmlEscape(media_uri) + "</res></item></DIDL-Lite>";
+        DlnaXml::Escape(media_uri) + "</res></item></DIDL-Lite>";
 
     const std::string set_uri_args =
-        "<InstanceID>0</InstanceID><CurrentURI>" + XmlEscape(media_uri) +
-        "</CurrentURI><CurrentURIMetaData>" + XmlEscape(metadata) +
+        "<InstanceID>0</InstanceID><CurrentURI>" + DlnaXml::Escape(media_uri) +
+        "</CurrentURI><CurrentURIMetaData>" + DlnaXml::Escape(metadata) +
         "</CurrentURIMetaData>";
 
     if (!Invoke(renderer, "SetAVTransportURI", set_uri_args, timeout_ms)) return false;
@@ -147,14 +147,14 @@ bool DlnaControl::SetNextUri(const DlnaRenderer& renderer,
         "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" "
         "xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\">"
         "<item id=\"0\" parentID=\"-1\" restricted=\"1\">"
-        "<dc:title>" + XmlEscape(title.empty() ? "EchoEar audio" : title) + "</dc:title>"
+        "<dc:title>" + DlnaXml::Escape(title.empty() ? "EchoEar audio" : title) + "</dc:title>"
         "<upnp:class>object.item.audioItem.musicTrack</upnp:class>"
         "<res protocolInfo=\"http-get:*:audio/wav:*\">" +
-        XmlEscape(media_uri) + "</res></item></DIDL-Lite>";
+        DlnaXml::Escape(media_uri) + "</res></item></DIDL-Lite>";
 
     const std::string arguments =
-        "<InstanceID>0</InstanceID><NextURI>" + XmlEscape(media_uri) +
-        "</NextURI><NextURIMetaData>" + XmlEscape(metadata) +
+        "<InstanceID>0</InstanceID><NextURI>" + DlnaXml::Escape(media_uri) +
+        "</NextURI><NextURIMetaData>" + DlnaXml::Escape(metadata) +
         "</NextURIMetaData>";
     return Invoke(renderer, "SetNextAVTransportURI", arguments, timeout_ms);
 }
