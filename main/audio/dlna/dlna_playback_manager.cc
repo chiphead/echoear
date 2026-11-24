@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <cmath>
 #include <new>
 #include <utility>
 
@@ -40,6 +41,41 @@ const char* TransportStateName(DlnaTransportState state) {
         case DlnaTransportState::kTransitioning: return "TRANSITIONING";
         case DlnaTransportState::kUnknown: default: return "UNKNOWN";
     }
+}
+
+void LogWavSignal(const uint8_t* wav_data, size_t wav_size) {
+    if (wav_data == nullptr || wav_size <= 44 || ((wav_size - 44) % 2) != 0) {
+        ESP_LOGW(kTag, "WAV PCM signal unavailable: wav_bytes=%u",
+                 static_cast<unsigned>(wav_size));
+        return;
+    }
+
+    const auto* samples = reinterpret_cast<const int16_t*>(wav_data + 44);
+    const size_t sample_count = (wav_size - 44) / sizeof(int16_t);
+    uint64_t sum_squares = 0;
+    size_t nonzero_samples = 0;
+    int32_t peak = 0;
+    int16_t minimum = INT16_MAX;
+    int16_t maximum = INT16_MIN;
+    for (size_t i = 0; i < sample_count; ++i) {
+        const int32_t sample = samples[i];
+        const int32_t magnitude = sample < 0 ? -sample : sample;
+        if (magnitude > peak) peak = magnitude;
+        if (sample != 0) ++nonzero_samples;
+        if (samples[i] < minimum) minimum = samples[i];
+        if (samples[i] > maximum) maximum = samples[i];
+        sum_squares += static_cast<uint64_t>(magnitude) *
+                       static_cast<uint64_t>(magnitude);
+    }
+    const double rms = sample_count == 0 ? 0.0 :
+        std::sqrt(static_cast<double>(sum_squares) /
+                  static_cast<double>(sample_count));
+    ESP_LOGI(kTag,
+             "WAV PCM signal: samples=%u nonzero=%u peak=%ld rms=%.1f min=%d max=%d",
+             static_cast<unsigned>(sample_count),
+             static_cast<unsigned>(nonzero_samples),
+             static_cast<long>(peak), rms,
+             static_cast<int>(minimum), static_cast<int>(maximum));
 }
 }  // namespace
 
@@ -639,6 +675,7 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
 
     auto publish_item = [this](Item& item) -> bool {
         if (item.resource.wav_data == nullptr || item.resource.wav_size < 44) return false;
+        LogWavSignal(item.resource.wav_data, item.resource.wav_size);
         const uint32_t sequence = ++resource_sequence_;
         if (!resource_registry_.Publish(item.resource.utterance_generation, sequence,
                                         item.resource.wav_data, item.resource.wav_size,
