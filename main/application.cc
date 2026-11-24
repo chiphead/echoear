@@ -103,7 +103,8 @@ void Application::Initialize() {
         // Queue drain may be a short inter-packet gap rather than end-of-stream.
         // DLNA applies a bounded silence grace before finalizing the partial WAV;
         // all network work remains in its worker task.
-        dlna_playback_manager_.EndUtterance();
+        const bool stream_finished = tts_stream_end_seen_.exchange(false);
+        dlna_playback_manager_.EndUtterance(stream_finished);
 #endif
         xEventGroupSetBits(event_group_, MAIN_EVENT_PLAYBACK_DRAINED);
     };
@@ -663,11 +664,21 @@ void Application::InitializeProtocol() {
                 return;
             }
             if (strcmp(state->valuestring, "start") == 0) {
+                tts_stream_end_seen_.store(false);
                 Schedule([this]() {
                     aborted_ = false;
                     SetDeviceState(kDeviceStateSpeaking);
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
+                // The WebSocket preserves message order. If the final packet has
+                // already drained, close the WAV immediately; otherwise the
+                // playback-drained callback will consume this marker later.
+                tts_stream_end_seen_.store(true);
+#if CONFIG_DLNA_AUDIO_OUTPUT
+                if (audio_service_.IsPlaybackIdle() && tts_stream_end_seen_.exchange(false)) {
+                    dlna_playback_manager_.EndUtterance(true);
+                }
+#endif
                 Schedule([this]() {
                     if (GetDeviceState() == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {

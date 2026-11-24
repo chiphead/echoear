@@ -150,6 +150,9 @@ private:
     DlnaPlaybackManager dlna_playback_manager_;
 #endif
     std::atomic<bool> voice_interaction_enabled_{true};
+    // Protocol-level TTS stop is an explicit end marker; consume it only after
+    // AudioService confirms that all received audio has drained.
+    std::atomic<bool> tts_stream_end_seen_{false};
     NotifyPlayer notify_player_;
     uint32_t notification_playback_id_ = 0;
     std::unique_ptr<Ota> ota_;

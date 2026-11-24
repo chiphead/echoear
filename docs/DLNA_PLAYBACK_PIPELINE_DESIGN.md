@@ -183,8 +183,8 @@ AVTransport SOAP escaping and response extraction now share the header-only `dln
 
 ## PCM segmentation and producer/consumer budget
 
-- The default PCM accumulator capacity is now 256 KiB per segment (excluding the 44-byte WAV header). At the fixed 32 kHz / 16-bit output format this represents approximately 4.096 seconds of mono audio or 2.048 seconds of stereo audio.
-- The previous 512 KiB default represented approximately 8.192 seconds mono / 4.096 seconds stereo. Halving the segment size reduces the amount of PCM accumulated before the first full segment is queued and reduces each detached WAV allocation, at the cost of more frequent AVTransport transitions.
+- The current PCM accumulator capacity is 512 KiB per segment (excluding the 44-byte WAV header). At the fixed 32 kHz / 16-bit output format this represents approximately 8.192 seconds of mono audio or 4.096 seconds of stereo audio.
+- This larger capacity is the validated baseline for the Sony SRS-X88: typical short TTS utterances remain in one WAV resource, avoiding the audible gaps observed during multi-resource AVTransport handoff. Longer utterances can still roll over into additional resources and require separate hardware validation.
 - This is a transport segmentation change only: sample rate, sample format, channel count, and PCM samples are unchanged. It does not reduce audio fidelity.
 - Each queued segment carries its calculated duration as metadata. The DLNA worker logs dequeued and look-ahead segment durations plus queue depth; queue-full and callback issues are counted atomically and logged by the worker. The AudioOutputTask callback and PCM buffer finalization do not perform synchronous logging.
 - The callback remains non-blocking with respect to network operations. It can still drop the remainder of an utterance if all three accumulators are occupied; the worker must consume and recycle segments quickly enough to keep pace with the real-time PCM producer.
