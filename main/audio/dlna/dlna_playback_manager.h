@@ -66,9 +66,9 @@ private:
     // while subsequent complete utterances are buffered without fragmenting
     // ordinary speech into independently initialized DLNA media items.
     static constexpr size_t kBufferCount = 3;
-    // Match the original 512 KiB utterance buffer. At 32 kHz mono PCM16 this
-    // holds about 8.2 seconds, so normal speech is published as one WAV.
-    // Longer utterances remain bounded and may use a second resource.
+    // Publish the first segment after about 1.024 seconds of 32 kHz mono PCM16.
+    // The worker can start playback while the utterance is still being produced;
+    // subsequent segments continue through the existing look-ahead path.
     static constexpr size_t kPcmSegmentBytes = 64 * 1024;
     DlnaPcmBuffer buffers_[kBufferCount] = {
         DlnaPcmBuffer(kPcmSegmentBytes),
