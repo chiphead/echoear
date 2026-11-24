@@ -254,6 +254,10 @@ bool DlnaPlaybackManager::WritePcm(const int16_t* samples, size_t sample_count,
         utterance_decided_ = true;
         current_utterance_generation_ = utterance_generation_.load();
         utterance_first_pcm_us_ = esp_timer_get_time();
+        ESP_LOGI(kTag,
+                 "Timing utterance first PCM: generation=%u source_rate=%d channels=%d samples=%u sink_ready=%d",
+                 static_cast<unsigned>(current_utterance_generation_), sample_rate, channels,
+                 static_cast<unsigned>(sample_count), sink_ready_.load());
         // sink_ready_ can briefly lag a disconnect/reconnect transition:
         // discovery may finish while NotifyNetworkDisconnected() is running.
         // Require the network session itself to be active before committing
@@ -451,12 +455,16 @@ bool DlnaPlaybackManager::QueueSegmentLocked(uint8_t index) {
              static_cast<long long>((resource.finalized_us - resource.first_pcm_us) / 1000),
              static_cast<unsigned>(resource.duration_ms),
              static_cast<unsigned>(resource.wav_size));
+    resource.queued_us = esp_timer_get_time();
     if (xQueueSend(resource_queue_, &resource, 0) != pdTRUE) {
         heap_caps_free(resource.wav_data);
         recycle_mask_.fetch_or(1u << index);
         queue_drop_count_.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
+    ESP_LOGI(kTag, "Timing segment queued: finalize_to_queue=%lldms queue_depth=%u",
+             static_cast<long long>((resource.queued_us - resource.finalized_us) / 1000),
+             static_cast<unsigned>(uxQueueMessagesWaiting(resource_queue_)));
     return true;
 }
 
@@ -487,6 +495,10 @@ void DlnaPlaybackManager::EndUtterance() {
 
     // AudioService queue-drained is not a protocol end-of-stream marker. A
     // short inter-packet gap must not turn every Opus frame into a tiny WAV.
+    const int64_t end_us = esp_timer_get_time();
+    ESP_LOGI(kTag, "Timing utterance drained: pcm_to_drain=%lldms grace=%ums",
+             static_cast<long long>((end_us - utterance_first_pcm_us_) / 1000),
+             static_cast<unsigned>(kEndSilenceGraceMs));
     end_pending_ = true;
     end_pending_tick_ = xTaskGetTickCount();
 }
@@ -671,6 +683,11 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         resource_registry_.Retire(current.path);
         return;
     }
+    ESP_LOGI(kTag, "Timing resource ready: pcm_to_worker=%lldms queue_wait=%lldms wav_bytes=%u duration=%ums",
+             static_cast<long long>((esp_timer_get_time() - current.resource.first_pcm_us) / 1000),
+             static_cast<long long>((esp_timer_get_time() - current.resource.queued_us) / 1000),
+             static_cast<unsigned>(current.resource.wav_size),
+             static_cast<unsigned>(current.duration_ms));
     const int64_t control_started_us = esp_timer_get_time();
     const bool start_accepted = DlnaControl::SetUriAndPlay(
         renderer_, current.uri, "EchoEar audio", current.duration_ms,
@@ -721,10 +738,12 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         if (!have_next) {
             Resource queued{};
             if (xQueueReceive(resource_queue_, &queued, pdMS_TO_TICKS(100)) == pdTRUE) {
-                ESP_LOGI(kTag, "Dequeued look-ahead segment: %u ms, queue_depth=%u/%u",
+                ESP_LOGI(kTag, "Dequeued look-ahead segment: %u ms, queue_depth=%u/%u queue_wait=%lldms pcm_to_dequeue=%lldms",
                          static_cast<unsigned>(queued.duration_ms),
                          static_cast<unsigned>(uxQueueMessagesWaiting(resource_queue_)),
-                         static_cast<unsigned>(kQueueDepth));
+                         static_cast<unsigned>(kQueueDepth),
+                         static_cast<long long>((esp_timer_get_time() - queued.queued_us) / 1000),
+                         static_cast<long long>((esp_timer_get_time() - queued.first_pcm_us) / 1000));
                 recycle_buffer(queued.buffer_index);
                 if (queued.wav_data != nullptr) {
                     if (queued.utterance_generation != utterance_generation_.load()) {
@@ -1331,7 +1350,11 @@ void DlnaPlaybackManager::Worker() {
         if (network_available_.load() && !renderer_ready_ &&
             !network_lost_.load() &&
             (next_discovery == 0 || xTaskGetTickCount() >= next_discovery)) {
+            const int64_t discovery_started_us = esp_timer_get_time();
             const bool discovered = FindSonyRenderer(renderer_);
+            ESP_LOGI(kTag, "Timing renderer discovery: elapsed=%lldms found=%d",
+                     static_cast<long long>((esp_timer_get_time() - discovery_started_us) / 1000),
+                     discovered);
             // Discovery performs several blocking network requests. The link
             // may be lost while it runs, so its result must not revive a sink
             // belonging to the invalidated session.
