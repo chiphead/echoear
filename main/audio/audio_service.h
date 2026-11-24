@@ -205,6 +205,11 @@ private:
     bool output_in_flight_ = false;
     bool playback_drained_notified_ = true;
     uint32_t playback_generation_ = 0;
+    // Diagnostic window for incoming TTS/Opus packets. Reset with the decoder
+    // so we can distinguish source/network pacing from AudioOutputTask pacing.
+    uint32_t playback_packet_count_ = 0;
+    int64_t playback_first_packet_us_ = 0;
+    int64_t playback_last_packet_us_ = 0;
     // For server AEC
     FixedQueue<uint32_t, MAX_TIMESTAMPS_IN_QUEUE> timestamp_queue_;
 
