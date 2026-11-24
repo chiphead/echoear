@@ -735,6 +735,18 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
     while (!stopping_.load() && network_available_.load() &&
            !network_lost_.load() &&
            current.resource.utterance_generation == utterance_generation_.load()) {
+        // ProcessResource owns the worker while a renderer item is active.
+        // Continue servicing the PCM utterance boundary here; otherwise the
+        // worker cannot finalize the tail until the current WAV has stopped.
+        {
+            std::lock_guard<std::mutex> lock(buffer_mutex_);
+            if (end_pending_ &&
+                (xTaskGetTickCount() - end_pending_tick_) >=
+                    pdMS_TO_TICKS(kEndSilenceGraceMs)) {
+                FinalizePendingUtteranceLocked();
+            }
+        }
+
         if (!have_next) {
             Resource queued{};
             if (xQueueReceive(resource_queue_, &queued, pdMS_TO_TICKS(100)) == pdTRUE) {
