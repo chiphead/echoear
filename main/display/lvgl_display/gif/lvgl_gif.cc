@@ -199,13 +199,19 @@ void LvglGif::NextFrame() {
 
     // Get next frame
     int has_next = gd_get_frame(gif_);
-    if (has_next == 0) {
-        // Animation truly finished (non-infinite loop)
+    if (has_next <= 0) {
+        // 0 means normal animation completion; -1 means malformed GIF data.
+        // Never render after a decoder error: its frame descriptor may be invalid.
         playing_ = false;
+        loop_waiting_ = false;
         if (timer_) {
             lv_timer_pause(timer_);
         }
-        ESP_LOGD(TAG, "GIF animation completed");
+        if (has_next < 0) {
+            ESP_LOGE(TAG, "GIF decoding failed; animation stopped to protect display buffers");
+        } else {
+            ESP_LOGD(TAG, "GIF animation completed");
+        }
         return;
     }
 
