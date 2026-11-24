@@ -14,6 +14,9 @@
 
 #include <driver/gpio.h>
 #include <esp_log.h>
+#if CONFIG_DLNA_AUDIO_OUTPUT
+#include <wifi_manager.h>
+#endif
 #include <arpa/inet.h>
 #include <cJSON.h>
 #include <cstring>
@@ -48,6 +51,11 @@ Application::Application() : notify_player_(audio_service_) {
 }
 
 Application::~Application() {
+    // AudioService callbacks capture this Application and may call the DLNA
+    // manager. Stop and join its tasks while all members are still alive.
+    audio_service_.Stop();
+    AudioServiceCallbacks empty_audio_callbacks{};
+    audio_service_.SetCallbacks(empty_audio_callbacks);
     notify_player_.Stop();
     if (clock_timer_handle_ != nullptr) {
         esp_timer_stop(clock_timer_handle_);
@@ -85,9 +93,26 @@ void Application::Initialize() {
     callbacks.on_vad_change = [this](bool speaking) {
         xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
     };
+#if CONFIG_DLNA_AUDIO_OUTPUT
+    callbacks.on_playback_aborted = [this]() {
+        dlna_playback_manager_.AbortUtterance();
+    };
+#endif
     callbacks.on_playback_drained = [this]() {
+#if CONFIG_DLNA_AUDIO_OUTPUT
+        // Queue drain may be a short inter-packet gap rather than end-of-stream.
+        // DLNA applies a bounded silence grace before finalizing the partial WAV;
+        // all network work remains in its worker task.
+        dlna_playback_manager_.EndUtterance();
+#endif
         xEventGroupSetBits(event_group_, MAIN_EVENT_PLAYBACK_DRAINED);
     };
+#if CONFIG_DLNA_AUDIO_OUTPUT
+    callbacks.on_pcm_output = [this, codec](const std::vector<int16_t>& pcm, int sample_rate) {
+        return dlna_playback_manager_.WritePcm(
+            pcm.data(), pcm.size(), sample_rate, codec->output_channels());
+    };
+#endif
     callbacks.on_playback_progress = [this](uint32_t playback_id, uint32_t media_position_ms) {
         notify_player_.OnPlaybackProgress(playback_id, media_position_ms);
     };
@@ -288,6 +313,19 @@ void Application::Run() {
 
 void Application::HandleNetworkConnectedEvent() {
     ESP_LOGI(TAG, "Network connected");
+#if CONFIG_DLNA_AUDIO_OUTPUT
+    const std::string host_ipv4 = WifiManager::GetInstance().GetIpAddress();
+    if (!host_ipv4.empty() && host_ipv4 != "0.0.0.0") {
+        auto codec = Board::GetInstance().GetAudioCodec();
+        if (codec == nullptr ||
+            !dlna_playback_manager_.Start(host_ipv4, codec->output_sample_rate(),
+                                          codec->output_channels())) {
+            ESP_LOGE(TAG, "Failed to start DLNA audio output manager");
+        }
+    } else {
+        ESP_LOGW(TAG, "DLNA output not started: Wi-Fi IPv4 address unavailable");
+    }
+#endif
     auto state = GetDeviceState();
 
     if (state == kDeviceStateStarting || state == kDeviceStateWifiConfiguring) {
@@ -314,6 +352,9 @@ void Application::HandleNetworkConnectedEvent() {
 }
 
 void Application::HandleNetworkDisconnectedEvent() {
+#if CONFIG_DLNA_AUDIO_OUTPUT
+    dlna_playback_manager_.NotifyNetworkDisconnected();
+#endif
     // Close current conversation when network disconnected
     auto state = GetDeviceState();
     if (state == kDeviceStateNotifying) {

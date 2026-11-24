@@ -52,6 +52,9 @@
 #define AS_EVENT_WAKE_WORD_RUNNING (1 << 1)
 #define AS_EVENT_AUDIO_PROCESSOR_RUNNING (1 << 2)
 #define AS_EVENT_AUDIO_INPUT_STOP_REQUEST (1 << 4)
+#define AS_EVENT_INPUT_TASK_EXITED (1 << 5)
+#define AS_EVENT_OUTPUT_TASK_EXITED (1 << 6)
+#define AS_EVENT_CODEC_TASK_EXITED (1 << 7)
 
 #define AS_OPUS_GET_FRAME_DRU_ENUM(duration_ms)                  \
     ((duration_ms) == 5     ? ESP_OPUS_ENC_FRAME_DURATION_5_MS   \
@@ -86,7 +89,13 @@ struct AudioServiceCallbacks {
     std::function<void(void)> on_audio_testing_queue_full;
     // Fired when the decode/playback queues and their in-flight work are drained.
     std::function<void(void)> on_playback_drained;
+    // Fired when Stop/ResetDecoder discards queued or in-flight playback.
+    std::function<void(void)> on_playback_aborted;
     std::function<void(uint32_t playback_id, uint32_t media_position_ms)> on_playback_progress;
+    // Optional non-blocking PCM sink. Return true when the frame was handled;
+    // return false to use the default local codec output. Implementations must
+    // enqueue/copy quickly and must never perform network I/O in this callback.
+    std::function<bool(const std::vector<int16_t>& pcm, int sample_rate)> on_pcm_output;
 };
 
 enum AudioTaskType {
@@ -109,6 +118,7 @@ struct DebugStatistics {
     uint32_t encode_count = 0;
     uint32_t playback_count = 0;
     uint32_t encode_drop_count = 0;
+    uint32_t decode_drop_count = 0;
 };
 
 class AudioService {
@@ -170,6 +180,7 @@ private:
     int decoder_frame_size_ = 0;
     DebugStatistics debug_statistics_;
     int64_t last_encode_drop_log_time_ = 0;
+    int64_t last_decode_drop_log_time_ = 0;
     srmodel_list_t* models_list_ = nullptr;
 
     EventGroupHandle_t event_group_;
@@ -194,6 +205,11 @@ private:
     bool output_in_flight_ = false;
     bool playback_drained_notified_ = true;
     uint32_t playback_generation_ = 0;
+    // Diagnostic window for incoming TTS/Opus packets. Reset with the decoder
+    // so we can distinguish source/network pacing from AudioOutputTask pacing.
+    uint32_t playback_packet_count_ = 0;
+    int64_t playback_first_packet_us_ = 0;
+    int64_t playback_last_packet_us_ = 0;
     // For server AEC
     FixedQueue<uint32_t, MAX_TIMESTAMPS_IN_QUEUE> timestamp_queue_;
 

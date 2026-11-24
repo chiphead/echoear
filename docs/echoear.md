@@ -24,6 +24,7 @@ git submodule update --init --recursive
 
 ```sh
 ./scripts/echoear.sh flash waveshare --port /dev/cu.usbmodem101
+./scripts/echoear.sh flash waveshare-132 --port /dev/cu.usbmodem101
 ./scripts/echoear.sh flash viewe --port /dev/cu.usbmodem101
 ```
 
@@ -62,6 +63,7 @@ git commit -m "Update EchoEar core"
 | 板型 | 显示旋转 | 音频 | 本机 AEC / 声音跟随 | SD CLK/CMD/D0 |
 |---|---|---|---|---|
 | waveshare | 270° | ES7210 + ES8311 | 已配置 / 实验功能 | 2/1/3 |
+| waveshare-132 | 0° LVGL + panel MADCTL 180° | ES8311 单麦克风 | 不支持 | 无 |
 | viewe | 原生方向 | 单 PDM + PCM5100 | 不支持 | 3/4/2 |
 
 主机工具测试：`python -m unittest discover -s scripts/tests -v`。公共模型测试位于子模块 tests，可独立运行。每次升级公共库都需构建两个板型；构建成功不能替代触摸、录音播放、唤醒和外设的实机验收。旧 VIEWE 工作树只保留作历史参考。

@@ -1,0 +1,40 @@
+name: DLNA Host Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+      - feature/dlna-sony-x88-audio
+    paths:
+      - "main/audio/dlna/**"
+      - "main/audio/audio_service.cc"
+      - "main/audio/audio_service.h"
+      - "main/application.cc"
+      - "scripts/tests/test_dlna_*.py"
+      - "main/CMakeLists.txt"
+      - "main/idf_component.yml"
+      - ".github/workflows/dlna-host-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dlna-host-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resource-registry:
+    name: Resource registry ownership tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Compile and run resource registry tests
+        run: python3 scripts/tests/test_dlna_resource_registry.py
+      - name: Compile and run SOAP XML tests
+        run: python3 scripts/tests/test_dlna_xml.py
+      - name: Compile and run PCM buffer tests
+        run: python3 scripts/tests/test_dlna_pcm_buffer.py
+      - name: Compile and run HTTP Range tests
+        run: python3 scripts/tests/test_dlna_http_range.py

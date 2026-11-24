@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One source tree, board-specific build packages and guarded USB installation."""
 import argparse
-import fcntl
+import contextlib
 import hashlib
 import json
 import os
@@ -11,9 +11,44 @@ import shutil
 import subprocess
 import sys
 
+if os.name == 'nt':
+    import msvcrt
+else:
+    import fcntl
+
 ROOT = Path(__file__).resolve().parents[1]
-BOARDS = {'waveshare': 'echoear-waveshare-1.75b', 'viewe': 'echoear-viewe-1.75'}
+BOARDS = {'waveshare': 'echoear-waveshare-1.75b', 'waveshare-132': 'echoear-waveshare-1.32', 'viewe': 'echoear-viewe-1.75'}
 KNOWN_DEVICES = {'30:ed:a0:29:a5:20': 'waveshare', '10:51:db:8e:d9:7c': 'viewe'}
+
+
+@contextlib.contextmanager
+def exclusive_lock(lock_file):
+    """Acquire a non-blocking process lock on Windows and POSIX."""
+    if os.name == 'nt':
+        lock_file.seek(0)
+        if lock_file.read(1) == '':
+            lock_file.seek(0)
+            lock_file.write('\0')
+            lock_file.flush()
+        lock_file.seek(0)
+        try:
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as error:
+            raise RuntimeError('Another EchoEar build/flash operation is running') from error
+        try:
+            yield
+        finally:
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            raise RuntimeError('Another EchoEar build/flash operation is running') from error
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
 def digest(path):
@@ -117,17 +152,17 @@ def main():
     a = parser.parse_args()
     lockdir = ROOT / 'dist/echoear'
     lockdir.mkdir(parents=True, exist_ok=True)
-    with (lockdir / '.lock').open('w') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        if a.action == 'build':
-            for board in BOARDS if a.board == 'all' else [a.board]:
-                build(board, a.output.resolve())
-        else:
-            flash(a.board, (a.package or lockdir / a.board).resolve(), a.port, a.full, a.expected_mac)
+    with (lockdir / '.lock').open('a+') as lock:
+        with exclusive_lock(lock):
+            if a.action == 'build':
+                for board in BOARDS if a.board == 'all' else [a.board]:
+                    build(board, a.output.resolve())
+            else:
+                flash(a.board, (a.package or lockdir / a.board).resolve(), a.port, a.full, a.expected_mac)
 
 
 if __name__ == '__main__':
     try:
         main()
-    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+    except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError) as error:
         sys.exit(str(error))

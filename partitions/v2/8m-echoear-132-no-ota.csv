@@ -1,0 +1,9 @@
+# ESP32-S3-Touch-AMOLED-1.32: 8MB flash, single factory app (no OTA)
+# Reserve 4MiB for the current app and 3.875MiB for default assets.
+# The assets partition includes fonts, WakeNet, PNG emoji, and the EchoEar
+# monochrome-eye GIF animations.
+# Name,      Type, SubType, Offset,   Size, Flags
+nvs,         data, nvs,     0x9000,   0x4000,
+phy_init,    data, phy,     0xf000,   0x1000,
+factory,     app,  factory, 0x20000,  0x400000,
+assets,      data, spiffs,  0x420000, 0x3E0000,

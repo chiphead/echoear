@@ -43,7 +43,21 @@ set(SOURCES "audio/audio_codec.cc"
             "main.cc"
             )
 
-set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "audio/demuxer" "protocols")
+# Keep the experimental Sony DLNA transport isolated to its target board.
+if(CONFIG_BOARD_TYPE_ECHOEAR_WAVESHARE_1_32)
+    list(APPEND SOURCES
+        "audio/dlna/dlna_discovery.cc"
+        "audio/dlna/dlna_device_description.cc"
+        "audio/dlna/dlna_control.cc"
+        "audio/dlna/dlna_media_server.cc"
+        "audio/dlna/dlna_resource_registry.cc"
+        "audio/dlna/dlna_pcm_buffer.cc"
+        "audio/dlna/dlna_playback_manager.cc"
+        "audio/dlna/dlna_smoke_test.cc"
+    )
+endif()
+
+set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "audio/dlna" "audio/demuxer" "protocols")
 
 # Add board common files
 list(APPEND SOURCES
@@ -397,6 +411,27 @@ elseif(CONFIG_BOARD_TYPE_ECHOEAR_WAVESHARE_1_75B)
     set(BUILTIN_TEXT_FONT font_noto_sans_basic_30_4)
     set(BUILTIN_ICON_FONT font_material_symbols_30_4)
     set(DEFAULT_EMOJI_COLLECTION noto-color-emoji_64)
+elseif(CONFIG_BOARD_TYPE_ECHOEAR_WAVESHARE_1_32)
+    set(BOARD_DIR "echoear-waveshare-1.32")
+    set(BUILTIN_TEXT_FONT font_noto_sans_basic_20_4)
+    set(BUILTIN_ICON_FONT font_material_symbols_20_4)
+    set(DEFAULT_EMOJI_COLLECTION noto-color-emoji_32)
+    # Fetch the pinned upstream release and extract only the original eye GIFs.
+    # The release's 1.75B firmware and partition table are never used.
+    set(DEFAULT_ASSETS_EXTRA_FILES "${CMAKE_BINARY_DIR}/echoear-waveshare-1.32-eye-assets")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_LIST_DIR}/../scripts/prepare_echoear_eye_assets.py"
+    )
+    execute_process(
+        COMMAND python "${CMAKE_CURRENT_LIST_DIR}/../scripts/prepare_echoear_eye_assets.py"
+                --output-dir "${DEFAULT_ASSETS_EXTRA_FILES}"
+                --cache-dir "${CMAKE_BINARY_DIR}/echoear-upstream-cache"
+        RESULT_VARIABLE ECHOEAR_EYE_ASSETS_RESULT
+    )
+    if(NOT ECHOEAR_EYE_ASSETS_RESULT EQUAL 0)
+        message(FATAL_ERROR
+            "Failed to prepare EchoEar eye GIF assets. Check network access and rerun idf.py reconfigure.")
+    endif()
 elseif(CONFIG_BOARD_TYPE_WAVESHARE_ESP32_S3_TOUCH_AMOLED_1_75)
     set(BOARD_DIR "waveshare/esp32-s3-touch-amoled-1.75")
     set(BUILTIN_TEXT_FONT font_noto_sans_basic_30_4)
@@ -1124,9 +1159,13 @@ idf_component_register(SRCS ${SOURCES}
                     WHOLE_ARCHIVE
                     PRIV_REQUIRES
                         echoear-core
+                        esp_audio_effects
                         esp_pm
                         esp_psram
                         esp_netif
+                        lwip
+                        esp_http_client
+                        esp_http_server
                         esp_eth
                         esp_driver_gpio
                         esp_driver_uart
@@ -1344,9 +1383,14 @@ function(build_default_assets_bin)
         list(APPEND DEFAULT_ASSETS_DEPENDENCIES ${DEFAULT_EMOJI_FILES})
     endif()
 
-    # Add default assets extra files if defined
+    # Add default assets extra files if defined. Track every file so changes
+    # to GIFs or other board-specific assets regenerate generated_assets.bin.
     if(DEFAULT_ASSETS_EXTRA_FILES)
         list(APPEND BUILD_ARGS "--extra_files" "${DEFAULT_ASSETS_EXTRA_FILES}")
+        file(GLOB_RECURSE DEFAULT_EXTRA_ASSET_FILES CONFIGURE_DEPENDS
+            "${DEFAULT_ASSETS_EXTRA_FILES}/*"
+        )
+        list(APPEND DEFAULT_ASSETS_DEPENDENCIES ${DEFAULT_EXTRA_ASSET_FILES})
     endif()
 
     list(APPEND BUILD_ARGS "--esp_sr_model_path" "${ESP_SR_MODEL_PATH}")

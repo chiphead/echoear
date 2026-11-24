@@ -1,4 +1,8 @@
 #include "wifi_board.h"
+#ifdef CONFIG_DLNA_SONY_X88_SMOKE_TEST
+#include "dlna_smoke_test.h"
+#include <atomic>
+#endif
 
 #include "display.h"
 #include "application.h"
@@ -125,6 +129,18 @@ void WifiBoard::OnNetworkEvent(NetworkEvent event, const std::string& data) {
 #endif
             in_config_mode_ = false;
             ESP_LOGI(TAG, "Connected to WiFi: %s", data.c_str());
+#ifdef CONFIG_DLNA_SONY_X88_SMOKE_TEST
+            {
+                static std::atomic<bool> started{false};
+                bool expected = false;
+                if (started.compare_exchange_strong(expected, true)) {
+                    if (!DlnaSmokeTest::Start(WifiManager::GetInstance().GetIpAddress())) {
+                        started.store(false);
+                        ESP_LOGW(TAG, "Could not start optional Sony DLNA smoke test");
+                    }
+                }
+            }
+#endif
             break;
         case NetworkEvent::Scanning:
             ESP_LOGI(TAG, "WiFi scanning");

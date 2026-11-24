@@ -1,4 +1,5 @@
 #include "audio_service.h"
+#include <cstdint>
 #include <esp_log.h>
 #include <cstring>
 
@@ -28,6 +29,12 @@
 AudioService::AudioService() { event_group_ = xEventGroupCreate(); }
 
 AudioService::~AudioService() {
+    // Never destroy task-owned state while an audio task can still access it.
+    Stop();
+    if (audio_power_timer_ != nullptr) {
+        esp_timer_delete(audio_power_timer_);
+        audio_power_timer_ = nullptr;
+    }
     if (event_group_ != nullptr) {
         vEventGroupDelete(event_group_);
     }
@@ -115,70 +122,105 @@ void AudioService::Initialize(AudioCodec* codec) {
 }
 
 void AudioService::Start() {
+    if (event_group_ == nullptr || codec_ == nullptr) {
+        ESP_LOGE(TAG, "Start rejected: AudioService is not initialized");
+        return;
+    }
+    if (!service_stopped_.load()) {
+        ESP_LOGW(TAG, "Start ignored: audio service is already running");
+        return;
+    }
+    audio_input_task_handle_ = nullptr;
+    audio_output_task_handle_ = nullptr;
+    opus_codec_task_handle_ = nullptr;
+    xEventGroupClearBits(event_group_, AS_EVENT_INPUT_TASK_EXITED |
+                                           AS_EVENT_OUTPUT_TASK_EXITED |
+                                           AS_EVENT_CODEC_TASK_EXITED);
     service_stopped_.store(false);
     xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING | AS_EVENT_WAKE_WORD_RUNNING |
                                            AS_EVENT_AUDIO_PROCESSOR_RUNNING |
                                            AS_EVENT_AUDIO_INPUT_STOP_REQUEST);
 
-    esp_timer_start_periodic(audio_power_timer_, 1000000);
+    if (audio_power_timer_ != nullptr) esp_timer_start_periodic(audio_power_timer_, 1000000);
+    auto handle_task_creation = [this](BaseType_t result, const char* task_name) {
+        if (result == pdPASS) return true;
+        ESP_LOGE(TAG, "Failed to create %s task", task_name);
+        Stop();
+        return false;
+    };
 
 #if CONFIG_USE_AUDIO_PROCESSOR
     /* Start the audio input task */
-    xTaskCreatePinnedToCore(
+    const BaseType_t input_result = xTaskCreatePinnedToCore(
         [](void* arg) {
             AudioService* audio_service = (AudioService*)arg;
             audio_service->AudioInputTask();
+            xEventGroupSetBits(audio_service->event_group_, AS_EVENT_INPUT_TASK_EXITED);
             vTaskDelete(NULL);
         },
         "audio_input", 2048 * 3, this, 8, &audio_input_task_handle_, 0);
+    if (!handle_task_creation(input_result, "audio_input")) return;
 
     /* Start the audio output task */
-    xTaskCreate(
+    const BaseType_t output_result = xTaskCreate(
         [](void* arg) {
             AudioService* audio_service = (AudioService*)arg;
             audio_service->AudioOutputTask();
+            xEventGroupSetBits(audio_service->event_group_, AS_EVENT_OUTPUT_TASK_EXITED);
             vTaskDelete(NULL);
         },
         "audio_output", 2048 * 2, this, 4, &audio_output_task_handle_);
+    if (!handle_task_creation(output_result, "audio_output")) return;
 #else
     /* Start the audio input task */
-    xTaskCreate(
+    const BaseType_t input_result = xTaskCreate(
         [](void* arg) {
             AudioService* audio_service = (AudioService*)arg;
             audio_service->AudioInputTask();
+            xEventGroupSetBits(audio_service->event_group_, AS_EVENT_INPUT_TASK_EXITED);
             vTaskDelete(NULL);
         },
         "audio_input", 2048 * 2, this, 8, &audio_input_task_handle_);
+    if (!handle_task_creation(input_result, "audio_input")) return;
 
     /* Start the audio output task */
-    xTaskCreate(
+    const BaseType_t output_result = xTaskCreate(
         [](void* arg) {
             AudioService* audio_service = (AudioService*)arg;
             audio_service->AudioOutputTask();
+            xEventGroupSetBits(audio_service->event_group_, AS_EVENT_OUTPUT_TASK_EXITED);
             vTaskDelete(NULL);
         },
         "audio_output", 2048, this, 4, &audio_output_task_handle_);
+    if (!handle_task_creation(output_result, "audio_output")) return;
 #endif
 
     /* Start the opus codec task */
-    xTaskCreate(
+    const BaseType_t codec_result = xTaskCreate(
         [](void* arg) {
             AudioService* audio_service = (AudioService*)arg;
             audio_service->OpusCodecTask();
+            xEventGroupSetBits(audio_service->event_group_, AS_EVENT_CODEC_TASK_EXITED);
             vTaskDelete(NULL);
         },
         "opus_codec", 2048 * 12, this, 2, &opus_codec_task_handle_);
+    if (!handle_task_creation(codec_result, "opus_codec")) return;
 }
 
 void AudioService::Stop() {
-    esp_timer_stop(audio_power_timer_);
     service_stopped_.store(true);
-    xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING | AS_EVENT_WAKE_WORD_RUNNING |
-                                         AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+    if (audio_power_timer_ != nullptr) esp_timer_stop(audio_power_timer_);
+    if (event_group_ != nullptr) {
+        xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING |
+                                             AS_EVENT_WAKE_WORD_RUNNING |
+                                             AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+    }
 
+    bool playback_aborted = false;
     bool notify_drained = false;
     {
         std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+        playback_aborted = !IsPlaybackDrainedLocked();
         ++playback_generation_;
         audio_encode_queue_.clear();
         audio_decode_queue_.clear();
@@ -187,9 +229,26 @@ void AudioService::Stop() {
         notify_drained = MarkPlaybackDrainedLocked();
         audio_queue_cv_.notify_all();
     }
+    if (playback_aborted && callbacks_.on_playback_aborted) {
+        callbacks_.on_playback_aborted();
+    }
     if (notify_drained && callbacks_.on_playback_drained) {
         callbacks_.on_playback_drained();
     }
+
+    // Task handles remain non-null after self-deletion. Wait only for tasks
+    // successfully created by this Start() invocation; each wrapper publishes
+    // its exit bit immediately before deleting itself.
+    EventBits_t exit_mask = 0;
+    if (audio_input_task_handle_ != nullptr) exit_mask |= AS_EVENT_INPUT_TASK_EXITED;
+    if (audio_output_task_handle_ != nullptr) exit_mask |= AS_EVENT_OUTPUT_TASK_EXITED;
+    if (opus_codec_task_handle_ != nullptr) exit_mask |= AS_EVENT_CODEC_TASK_EXITED;
+    if (exit_mask != 0 && event_group_ != nullptr) {
+        xEventGroupWaitBits(event_group_, exit_mask, pdFALSE, pdTRUE, portMAX_DELAY);
+    }
+    audio_input_task_handle_ = nullptr;
+    audio_output_task_handle_ = nullptr;
+    opus_codec_task_handle_ = nullptr;
 }
 
 bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples) {
@@ -324,6 +383,8 @@ void AudioService::AudioInputTask() {
 }
 
 void AudioService::AudioOutputTask() {
+    TickType_t next_dlna_output_tick = xTaskGetTickCount();
+    bool dlna_pacing_active = false;
     while (true) {
         std::unique_lock<std::mutex> lock(audio_queue_mutex_);
         audio_queue_cv_.wait(
@@ -338,17 +399,56 @@ void AudioService::AudioOutputTask() {
         audio_queue_cv_.notify_all();
         lock.unlock();
 
-        if (!codec_->output_enabled()) {
-            esp_timer_stop(audio_power_timer_);
-            esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
-            codec_->EnableOutput(true);
-        }
-
         if (task.playback_id != 0 && callbacks_.on_playback_progress) {
             callbacks_.on_playback_progress(task.playback_id, task.media_position_ms);
         }
 
-        codec_->OutputData(task.pcm);
+        // A selected network sink may consume the decoded PCM asynchronously.
+        // The callback must only enqueue/copy data; blocking network operations
+        // are forbidden on AudioOutputTask. If no sink handles the frame, retain
+        // the existing local codec output path.
+        const bool pcm_handled =
+            callbacks_.on_pcm_output &&
+            callbacks_.on_pcm_output(task.pcm, codec_->output_sample_rate());
+        if (!pcm_handled) {
+            dlna_pacing_active = false;
+            if (!codec_->output_enabled()) {
+                esp_timer_stop(audio_power_timer_);
+                esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
+                codec_->EnableOutput(true);
+            }
+            codec_->OutputData(task.pcm);
+        } else {
+            // Unlike I2S OutputData(), a network PCM sink only copies into a
+            // bounded queue and otherwise runs as fast as packets arrive.
+            // Pace accepted DLNA frames at their decoded media duration so a
+            // fast producer cannot exhaust the three PCM accumulators before
+            // the renderer consumes the current/next WAV resources.
+            const int output_rate = codec_->output_sample_rate();
+            const int output_channels = codec_->output_channels();
+            if (output_rate > 0 && output_channels > 0) {
+                const uint64_t denominator =
+                    static_cast<uint64_t>(output_rate) * output_channels;
+                const uint32_t frame_duration_ms = static_cast<uint32_t>(
+                    (static_cast<uint64_t>(task.pcm.size()) * 1000 +
+                     denominator - 1) / denominator);
+                TickType_t frame_ticks = pdMS_TO_TICKS(frame_duration_ms);
+                if (frame_ticks == 0) frame_ticks = 1;
+                const TickType_t now = xTaskGetTickCount();
+                const int32_t lateness_ticks =
+                    static_cast<int32_t>(now - next_dlna_output_tick);
+                if (!dlna_pacing_active ||
+                    lateness_ticks > static_cast<int32_t>(frame_ticks * 2)) {
+                    // After a long source/network stall, restart the pacing
+                    // epoch instead of rapidly "catching up" old deadlines.
+                    next_dlna_output_tick = now;
+                    dlna_pacing_active = true;
+                }
+                vTaskDelayUntil(&next_dlna_output_tick, frame_ticks);
+            } else {
+                dlna_pacing_active = false;
+            }
+        }
 
         /* Update the last output time */
         last_output_time_ = std::chrono::steady_clock::now();
@@ -367,11 +467,21 @@ void AudioService::AudioOutputTask() {
 #endif
         output_in_flight_ = false;
         notify_drained = MarkPlaybackDrainedLocked();
+        const uint32_t received_packets = notify_drained ? playback_packet_count_ : 0;
+        const int64_t first_packet_us = notify_drained ? playback_first_packet_us_ : 0;
+        const int64_t last_packet_us = notify_drained ? playback_last_packet_us_ : 0;
         audio_queue_cv_.notify_all();
         lock.unlock();
 
-        if (notify_drained && callbacks_.on_playback_drained) {
-            callbacks_.on_playback_drained();
+        if (notify_drained) {
+            if (received_packets > 0 && first_packet_us > 0 && last_packet_us >= first_packet_us) {
+                ESP_LOGI(TAG, "Playback packet timing: packets=%u receive_span=%lldms",
+                         static_cast<unsigned>(received_packets),
+                         static_cast<long long>((last_packet_us - first_packet_us) / 1000));
+            }
+            if (callbacks_.on_playback_drained) {
+                callbacks_.on_playback_drained();
+            }
         }
     }
 
@@ -616,12 +726,27 @@ bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> pa
                        audio_decode_queue_.size() < MAX_DECODE_PACKETS_IN_QUEUE;
             });
         } else {
+            const uint32_t dropped_total = ++debug_statistics_.decode_drop_count;
+            const int64_t now = esp_timer_get_time();
+            const bool should_log = now - last_decode_drop_log_time_ >= 1000000;
+            if (should_log) last_decode_drop_log_time_ = now;
+            lock.unlock();
+            if (should_log) {
+                ESP_LOGW(TAG, "Decode queue is full, dropping incoming audio packet (dropped %lu so far)",
+                         static_cast<unsigned long>(dropped_total));
+            }
             return false;
         }
     }
     if (service_stopped_.load() || generation != playback_generation_) {
         return false;
     }
+    const int64_t packet_received_us = esp_timer_get_time();
+    if (playback_packet_count_ == 0) {
+        playback_first_packet_us_ = packet_received_us;
+    }
+    playback_last_packet_us_ = packet_received_us;
+    ++playback_packet_count_;
     playback_drained_notified_ = false;
     audio_decode_queue_.push_back(std::move(packet));
     audio_queue_cv_.notify_all();
@@ -796,9 +921,11 @@ bool AudioService::IsPlaybackIdle() {
 }
 
 void AudioService::ResetDecoder() {
+    bool playback_aborted = false;
     bool notify_drained = false;
     {
         std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+        playback_aborted = !IsPlaybackDrainedLocked();
         ++playback_generation_;
         std::unique_lock<std::mutex> decoder_lock(decoder_mutex_);
         if (opus_decoder_ != nullptr) {
@@ -809,8 +936,14 @@ void AudioService::ResetDecoder() {
         audio_decode_queue_.clear();
         audio_playback_queue_.clear();
         audio_testing_queue_.clear();
+        playback_packet_count_ = 0;
+        playback_first_packet_us_ = 0;
+        playback_last_packet_us_ = 0;
         notify_drained = MarkPlaybackDrainedLocked();
         audio_queue_cv_.notify_all();
+    }
+    if (playback_aborted && callbacks_.on_playback_aborted) {
+        callbacks_.on_playback_aborted();
     }
     if (notify_drained && callbacks_.on_playback_drained) {
         callbacks_.on_playback_drained();

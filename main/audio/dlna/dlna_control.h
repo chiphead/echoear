@@ -1,0 +1,44 @@
+#pragma once
+
+#include <cstdint>
+#include <string>
+
+#include "dlna_discovery.h"
+
+/**
+ * Minimal UPnP AVTransport control-point client.
+ * All methods perform blocking HTTP I/O; call from a worker task.
+ */
+enum class DlnaTransportState {
+    kUnknown,
+    kStopped,
+    kNoMediaPresent,
+    kPlaying,
+    kPaused,
+    kTransitioning,
+};
+
+class DlnaControl {
+public:
+    static bool SetUriAndPlay(const DlnaRenderer& renderer,
+                              const std::string& media_uri,
+                              const std::string& title,
+                              uint32_t duration_ms,
+                              uint32_t timeout_ms = 5000);
+    static bool SetNextUri(const DlnaRenderer& renderer,
+                           const std::string& media_uri,
+                           const std::string& title,
+                           uint32_t duration_ms,
+                           uint32_t timeout_ms = 5000);
+    static bool Stop(const DlnaRenderer& renderer, uint32_t timeout_ms = 5000);
+    static bool GetTransportState(const DlnaRenderer& renderer,
+                                  DlnaTransportState& state,
+                                  uint32_t timeout_ms = 3000);
+    static bool GetCurrentUri(const DlnaRenderer& renderer, std::string& uri,
+                              uint32_t timeout_ms = 3000);
+    static bool GetPositionInfo(const DlnaRenderer& renderer,
+                                std::string& track_duration,
+                                std::string& relative_time,
+                                std::string& track_uri,
+                                uint32_t timeout_ms = 3000);
+};

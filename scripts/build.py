@@ -1431,6 +1431,18 @@ def _prepare_target(target: str, preview: bool) -> None:
         print(f"[INFO] Configuring target {target}.")
 
 
+def _sdkconfig_defaults_files(
+    fragment: Path,
+    project_defaults: Path = Path("sdkconfig.defaults"),
+) -> list[str]:
+    """Return project defaults first, then board-specific overrides."""
+    defaults = []
+    if project_defaults.exists():
+        defaults.append(project_defaults.as_posix())
+    defaults.append(fragment.as_posix())
+    return defaults
+
+
 def _configure_build(
     target: str,
     sdkconfig_append: list[str],
@@ -1454,10 +1466,9 @@ def _configure_build(
         encoding="utf-8",
     )
 
-    defaults = []
-    if Path("sdkconfig.defaults").exists():
-        defaults.append("sdkconfig.defaults")
-    defaults.append(fragment.as_posix())
+    # ESP-IDF applies SDKCONFIG_DEFAULTS files in order; later files override
+    # earlier ones. Keep the repository defaults first and board settings last.
+    defaults = _sdkconfig_defaults_files(fragment)
     _run_idf(
         f"-DIDF_TARGET={target}",
         f"-DSDKCONFIG_DEFAULTS={';'.join(defaults)}",

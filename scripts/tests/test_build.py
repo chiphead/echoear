@@ -199,6 +199,97 @@ class VersionTests(unittest.TestCase):
                         f"0, not letter O: {option}",
                     )
 
+    def test_board_sdkconfig_defaults_override_project_defaults(self):
+        defaults = build._sdkconfig_defaults_files(
+            Path("build/xiaozhi-build.sdkconfig.defaults"),
+            ROOT / "sdkconfig.defaults",
+        )
+        self.assertEqual(
+            defaults,
+            [
+                (ROOT / "sdkconfig.defaults").as_posix(),
+                "build/xiaozhi-build.sdkconfig.defaults",
+            ],
+        )
+
+    def test_echoear_waveshare_132_build_configuration(self):
+        config_path = (
+            ROOT / "main/boards/echoear-waveshare-1.32/config.json"
+        )
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        self.assertEqual(config["target"], "esp32s3")
+        self.assertEqual(len(config["builds"]), 1)
+
+        options = build._sdkconfig_assignments(
+            config["builds"][0]["sdkconfig_append"]
+        )
+        self.assertEqual(
+            options["CONFIG_BOARD_TYPE_ECHOEAR_WAVESHARE_1_32"], "y"
+        )
+        self.assertEqual(options["CONFIG_ESPTOOLPY_FLASHSIZE_8MB"], "y")
+        self.assertEqual(options["CONFIG_ESPTOOLPY_FLASHSIZE_16MB"], "n")
+        self.assertEqual(options["CONFIG_PARTITION_TABLE_CUSTOM"], "y")
+        self.assertEqual(
+            options["CONFIG_PARTITION_TABLE_CUSTOM_FILENAME"],
+            '"partitions/v2/8m.csv"',
+        )
+        self.assertEqual(options["CONFIG_USE_DEVICE_AEC"], "n")
+        self.assertEqual(options["CONFIG_ECHOEAR_UI"], "y")
+        self.assertEqual(options["CONFIG_ECHOEAR_UI_REVIEW"], "n")
+        self.assertTrue((ROOT / "partitions/v2/8m.csv").is_file())
+
+        kconfig = (ROOT / "main/Kconfig.projbuild").read_text(encoding="utf-8")
+        self.assertIn(
+            "config BOARD_TYPE_ECHOEAR_WAVESHARE_1_32", kconfig
+        )
+        cmake = (ROOT / "main/CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn(
+            'set(BOARD_DIR "echoear-waveshare-1.32")', cmake
+        )
+        board_source = (
+            ROOT / "main/boards/echoear-waveshare-1.32/"
+            "echoear-waveshare-1.32.cc"
+        )
+        self.assertTrue(board_source.is_file())
+        manifest = (ROOT / "main/idf_component.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("espressif/esp_lcd_co5300:", manifest)
+        self.assertIn("kodediy/esp_lcd_touch_cst820:", manifest)
+
+        partition_lines = [
+            line.split("#", 1)[0].strip()
+            for line in (ROOT / "partitions/v2/8m.csv").read_text(
+                encoding="utf-8"
+            ).splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        assets = next(
+            line for line in partition_lines if line.startswith("assets,")
+        )
+        self.assertEqual(assets.split(",")[4].strip(), "2M")
+
+        s3_defaults = (
+            ROOT / "sdkconfig.defaults.esp32s3"
+        ).read_text(encoding="utf-8")
+        self.assertIn("CONFIG_SPIRAM=y", s3_defaults)
+        self.assertIn("CONFIG_SPIRAM_MODE_OCT=y", s3_defaults)
+
+    def test_echoear_waveshare_132_co5300_init_sequence(self):
+        source = (
+            ROOT / "main/boards/echoear-waveshare-1.32/"
+            "echoear-waveshare-1.32.cc"
+        ).read_text(encoding="utf-8")
+        for command in (
+            "{0xFE, (uint8_t[]) {0x20}, 1, 0}",
+            "{0x19, (uint8_t[]) {0x10}, 1, 0}",
+            "{0x1C, (uint8_t[]) {0xA0}, 1, 0}",
+            "{0x2B, (uint8_t[]) {0x00, 0x00, 0x01, 0xD1}, 4, 600}",
+            "{0x11, nullptr, 0, 600}",
+            "{0x29, nullptr, 0, 0}",
+        ):
+            self.assertIn(command, source)
+
     def test_default_flash_options_are_not_repeated(self):
         def read_defaults(path):
             values = {}
