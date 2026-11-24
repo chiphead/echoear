@@ -15,18 +15,43 @@ constexpr size_t kMaxSoapResponseBytes = 8 * 1024;
 struct SoapResponse {
     std::string body;
     bool overflow = false;
+    int64_t connected_us = 0;
+    int64_t header_sent_us = 0;
+    int64_t first_header_us = 0;
+    int64_t first_data_us = 0;
+    int64_t finished_us = 0;
 };
 
 esp_err_t HttpEvent(esp_http_client_event_t* event) {
     if (event == nullptr || event->user_data == nullptr) return ESP_OK;
     auto* response = static_cast<SoapResponse*>(event->user_data);
-    if (event->event_id == HTTP_EVENT_ON_DATA && event->data && event->data_len > 0) {
-        const size_t length = static_cast<size_t>(event->data_len);
-        if (response->body.size() + length > kMaxSoapResponseBytes) {
-            response->overflow = true;
-            return ESP_FAIL;
-        }
-        response->body.append(static_cast<const char*>(event->data), length);
+    const int64_t now_us = esp_timer_get_time();
+    switch (event->event_id) {
+        case HTTP_EVENT_ON_CONNECTED:
+            if (response->connected_us == 0) response->connected_us = now_us;
+            break;
+        case HTTP_EVENT_HEADER_SENT:
+            if (response->header_sent_us == 0) response->header_sent_us = now_us;
+            break;
+        case HTTP_EVENT_ON_HEADER:
+            if (response->first_header_us == 0) response->first_header_us = now_us;
+            break;
+        case HTTP_EVENT_ON_DATA:
+            if (event->data != nullptr && event->data_len > 0) {
+                if (response->first_data_us == 0) response->first_data_us = now_us;
+                const size_t length = static_cast<size_t>(event->data_len);
+                if (response->body.size() + length > kMaxSoapResponseBytes) {
+                    response->overflow = true;
+                    return ESP_FAIL;
+                }
+                response->body.append(static_cast<const char*>(event->data), length);
+            }
+            break;
+        case HTTP_EVENT_ON_FINISH:
+            if (response->finished_us == 0) response->finished_us = now_us;
+            break;
+        default:
+            break;
     }
     return ESP_OK;
 }
@@ -103,6 +128,16 @@ bool Invoke(const DlnaRenderer& renderer, const char* action,
     }
 
     if (response_body != nullptr) *response_body = response.body;
+    const auto elapsed_ms = [action_started_us](int64_t timestamp_us) -> long long {
+        return timestamp_us == 0 ? -1 :
+            static_cast<long long>((timestamp_us - action_started_us) / 1000);
+    };
+    ESP_LOGI(kTag,
+             "%s timing: connect=%lldms headers_sent=%lldms first_header=%lldms first_data=%lldms finish=%lldms total=%lldms",
+             action, elapsed_ms(response.connected_us), elapsed_ms(response.header_sent_us),
+             elapsed_ms(response.first_header_us), elapsed_ms(response.first_data_us),
+             elapsed_ms(response.finished_us),
+             static_cast<long long>((action_finished_us - action_started_us) / 1000));
     ESP_LOGI(kTag, "%s accepted by renderer (HTTP %d, elapsed=%lldms)", action, status,
              static_cast<long long>((action_finished_us - action_started_us) / 1000));
     return true;
