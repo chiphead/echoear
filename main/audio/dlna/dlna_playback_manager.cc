@@ -504,7 +504,7 @@ bool DlnaPlaybackManager::QueueSegmentLocked(uint8_t index) {
     return true;
 }
 
-void DlnaPlaybackManager::EndUtterance() {
+void DlnaPlaybackManager::EndUtterance(bool stream_finished) {
     std::lock_guard<std::mutex> lock(buffer_mutex_);
     if (discard_until_drain_) {
         utterance_dropping_ = false;
@@ -532,11 +532,16 @@ void DlnaPlaybackManager::EndUtterance() {
     // AudioService queue-drained is not a protocol end-of-stream marker. A
     // short inter-packet gap must not turn every Opus frame into a tiny WAV.
     const int64_t end_us = esp_timer_get_time();
-    ESP_LOGI(kTag, "Timing utterance drained: pcm_to_drain=%lldms grace=%ums",
+    const uint32_t grace_ms = stream_finished ? 0 : kEndSilenceGraceMs;
+    ESP_LOGI(kTag,
+             "Timing utterance drained: pcm_to_drain=%lldms grace=%ums explicit_end=%d",
              static_cast<long long>((end_us - utterance_first_pcm_us_) / 1000),
-             static_cast<unsigned>(kEndSilenceGraceMs));
+             static_cast<unsigned>(grace_ms), stream_finished);
     end_pending_ = true;
     end_pending_tick_ = xTaskGetTickCount();
+    if (stream_finished) {
+        FinalizePendingUtteranceLocked();
+    }
 }
 
 void DlnaPlaybackManager::FinalizePendingUtteranceLocked() {
