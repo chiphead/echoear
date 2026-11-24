@@ -467,11 +467,21 @@ void AudioService::AudioOutputTask() {
 #endif
         output_in_flight_ = false;
         notify_drained = MarkPlaybackDrainedLocked();
+        const uint32_t received_packets = notify_drained ? playback_packet_count_ : 0;
+        const int64_t first_packet_us = notify_drained ? playback_first_packet_us_ : 0;
+        const int64_t last_packet_us = notify_drained ? playback_last_packet_us_ : 0;
         audio_queue_cv_.notify_all();
         lock.unlock();
 
-        if (notify_drained && callbacks_.on_playback_drained) {
-            callbacks_.on_playback_drained();
+        if (notify_drained) {
+            if (received_packets > 0 && first_packet_us > 0 && last_packet_us >= first_packet_us) {
+                ESP_LOGI(TAG, "Playback packet timing: packets=%u receive_span=%lldms",
+                         static_cast<unsigned>(received_packets),
+                         static_cast<long long>((last_packet_us - first_packet_us) / 1000));
+            }
+            if (callbacks_.on_playback_drained) {
+                callbacks_.on_playback_drained();
+            }
         }
     }
 
@@ -731,6 +741,12 @@ bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> pa
     if (service_stopped_.load() || generation != playback_generation_) {
         return false;
     }
+    const int64_t packet_received_us = esp_timer_get_time();
+    if (playback_packet_count_ == 0) {
+        playback_first_packet_us_ = packet_received_us;
+    }
+    playback_last_packet_us_ = packet_received_us;
+    ++playback_packet_count_;
     playback_drained_notified_ = false;
     audio_decode_queue_.push_back(std::move(packet));
     audio_queue_cv_.notify_all();
@@ -920,6 +936,9 @@ void AudioService::ResetDecoder() {
         audio_decode_queue_.clear();
         audio_playback_queue_.clear();
         audio_testing_queue_.clear();
+        playback_packet_count_ = 0;
+        playback_first_packet_us_ = 0;
+        playback_last_packet_us_ = 0;
         notify_drained = MarkPlaybackDrainedLocked();
         audio_queue_cv_.notify_all();
     }
