@@ -69,7 +69,7 @@ private:
     // Match the original 512 KiB utterance buffer. At 32 kHz mono PCM16 this
     // holds about 8.2 seconds, so normal speech is published as one WAV.
     // Longer utterances remain bounded and may use a second resource.
-    static constexpr size_t kPcmSegmentBytes = 512 * 1024;
+    static constexpr size_t kPcmSegmentBytes = 64 * 1024;
     DlnaPcmBuffer buffers_[kBufferCount] = {
         DlnaPcmBuffer(kPcmSegmentBytes),
         DlnaPcmBuffer(kPcmSegmentBytes),
