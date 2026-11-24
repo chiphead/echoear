@@ -660,6 +660,22 @@ read_image(gd_GIF * gif)
 static void
 render_frame_rect(gd_GIF * gif, uint8_t * buffer)
 {
+    // A malformed/truncated GIF can leave an invalid frame descriptor behind.
+    // Validate with subtraction to avoid unsigned addition overflow before
+    // calculating any canvas or frame-buffer address.
+    if(!gif || !buffer || !gif->canvas || !gif->frame || !gif->palette ||
+       gif->width == 0 || gif->height == 0 ||
+       gif->fw == 0 || gif->fh == 0 ||
+       gif->fx >= gif->width || gif->fy >= gif->height ||
+       gif->fw > (uint32_t)(gif->width - gif->fx) ||
+       gif->fh > (uint32_t)(gif->height - gif->fy)) {
+        ESP_LOGW(TAG, "Skipping invalid GIF frame during render: frame=%ux%u+%u+%u canvas=%ux%u",
+                 gif ? gif->fw : 0, gif ? gif->fh : 0,
+                 gif ? gif->fx : 0, gif ? gif->fy : 0,
+                 gif ? gif->width : 0, gif ? gif->height : 0);
+        return;
+    }
+
     int i = gif->fy * gif->width + gif->fx;
 #ifdef GIFDEC_RENDER_FRAME
     GIFDEC_RENDER_FRAME(&buffer[i * 4], gif->fw, gif->fh, gif->width,
