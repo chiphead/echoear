@@ -22,7 +22,7 @@ struct DlnaResourceView {
  */
 class DlnaResourceRegistry {
 public:
-    static constexpr size_t kMaxResources = 2;
+    static constexpr size_t kMaxResources = 3;
     static constexpr size_t kMaxLeases = 8;
 
     DlnaResourceRegistry() = default;
