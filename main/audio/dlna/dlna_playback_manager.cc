@@ -1132,6 +1132,12 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                     next.resource.wav_data = nullptr;
                     next.resource.wav_size = 0;
                 }
+                if (have_staged && !staged.published &&
+                    staged.resource.wav_data != nullptr) {
+                    heap_caps_free(staged.resource.wav_data);
+                    staged.resource.wav_data = nullptr;
+                    staged.resource.wav_size = 0;
+                }
                 return;
             }
         }
