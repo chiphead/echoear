@@ -929,23 +929,26 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             stopped_since = 0;
         }
 
-        // PositionInfo is deliberately sampled at low frequency: it adds a
-        // SOAP round-trip, so avoid competing with the renderer's transition
-        // handling on every 650 ms state poll. Sample both active playback and
-        // a preloaded URI that Sony has already made current, including STOPPED
-        // or TRANSITIONING windows.
+        // PositionInfo is sampled during active playback as well as during
+        // preloaded-item transitions. The previous condition stopped polling
+        // as soon as PLAYING was observed, which left short single-item WAVs
+        // with no useful playback-position evidence.
         const TickType_t position_now = xTaskGetTickCount();
-        if ((!current.observed_playing || next.next_uri_observed) &&
-            static_cast<int32_t>(position_now - next_position_info_poll) >= 0) {
+        if (static_cast<int32_t>(position_now - next_position_info_poll) >= 0) {
             next_position_info_poll =
-                position_now + pdMS_TO_TICKS(2500);
+                position_now + pdMS_TO_TICKS(1000);
             std::string track_duration;
             std::string relative_time;
             std::string track_uri;
             if (DlnaControl::GetPositionInfo(renderer_, track_duration,
                                             relative_time, track_uri, 1500)) {
+                const uint32_t play_elapsed_ms =
+                    static_cast<uint32_t>(
+                        (xTaskGetTickCount() - current.started) *
+                        portTICK_PERIOD_MS);
                 ESP_LOGI(kTag,
-                         "Renderer position: duration=%s rel_time=%s track_uri=%s",
+                         "Renderer position: play_elapsed=%ums duration=%s rel_time=%s track_uri=%s",
+                         static_cast<unsigned>(play_elapsed_ms),
                          track_duration.c_str(), relative_time.c_str(),
                          track_uri.c_str());
             }
