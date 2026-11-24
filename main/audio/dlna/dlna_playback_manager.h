@@ -37,7 +37,7 @@ public:
     void NotifyNetworkDisconnected();
     bool WritePcm(const int16_t* samples, size_t sample_count,
                   int sample_rate, int channels);
-    void EndUtterance();
+    void EndUtterance(bool stream_finished = false);
     void AbortUtterance();
 
 private:
