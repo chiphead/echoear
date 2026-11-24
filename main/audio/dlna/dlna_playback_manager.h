@@ -66,10 +66,10 @@ private:
     // while subsequent complete utterances are buffered without fragmenting
     // ordinary speech into independently initialized DLNA media items.
     static constexpr size_t kBufferCount = 3;
-    // Publish the first segment after about 1.024 seconds of 32 kHz mono PCM16.
-    // The worker can start playback while the utterance is still being produced;
-    // subsequent segments continue through the existing look-ahead path.
-    static constexpr size_t kPcmSegmentBytes = 64 * 1024;
+    // Match the known-good 512 KiB WAV size used by the tested baseline.
+    // At 32 kHz mono PCM16 this holds about 8.2 seconds, avoiding very short
+    // media items that the Sony SRS-X88 did not reliably start in testing.
+    static constexpr size_t kPcmSegmentBytes = 512 * 1024;
     DlnaPcmBuffer buffers_[kBufferCount] = {
         DlnaPcmBuffer(kPcmSegmentBytes),
         DlnaPcmBuffer(kPcmSegmentBytes),
