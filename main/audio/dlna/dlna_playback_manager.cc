@@ -760,6 +760,11 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
 
     Item next{};
     bool have_next = false;
+    // Stage one further finalized WAV while current+next occupy the renderer
+    // pipeline. It is published early, then promoted as soon as next becomes
+    // current so SetNext can be issued without queue/registry work in between.
+    Item staged{};
+    bool have_staged = false;
     TickType_t next_poll = xTaskGetTickCount();
     TickType_t stopped_since = 0;
     TickType_t next_current_uri_poll = xTaskGetTickCount();
@@ -784,10 +789,13 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             }
         }
 
-        if (!have_next) {
+        if (!have_next || !have_staged) {
             Resource queued{};
-            if (xQueueReceive(resource_queue_, &queued, pdMS_TO_TICKS(100)) == pdTRUE) {
-                ESP_LOGI(kTag, "Dequeued look-ahead segment: %u ms, queue_depth=%u/%u queue_wait=%lldms pcm_to_dequeue=%lldms",
+            const bool loading_next = !have_next;
+            if (xQueueReceive(resource_queue_, &queued,
+                              loading_next ? pdMS_TO_TICKS(100) : 0) == pdTRUE) {
+                ESP_LOGI(kTag, "Dequeued %s segment: %u ms, queue_depth=%u/%u queue_wait=%lldms pcm_to_dequeue=%lldms",
+                         loading_next ? "look-ahead" : "staged",
                          static_cast<unsigned>(queued.duration_ms),
                          static_cast<unsigned>(uxQueueMessagesWaiting(resource_queue_)),
                          static_cast<unsigned>(kQueueDepth),
@@ -798,12 +806,17 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                     if (queued.utterance_generation != utterance_generation_.load()) {
                         heap_caps_free(queued.wav_data);
                     } else if (queued.wav_size >= 44) {
-                        next.resource = queued;
-                        have_next = true;
-                        if (publish_item(next)) {
-                            ESP_LOGI(kTag, "Prepared next DLNA item %s", next.uri.c_str());
+                        Item& destination = loading_next ? next : staged;
+                        destination.resource = queued;
+                        if (loading_next) have_next = true;
+                        else have_staged = true;
+                        if (publish_item(destination)) {
+                            ESP_LOGI(kTag, "Prepared %s DLNA item %s",
+                                     loading_next ? "next" : "staged",
+                                     destination.uri.c_str());
                         } else {
-                            ESP_LOGW(kTag, "Registry is busy; retaining look-ahead WAV until a slot is free");
+                            ESP_LOGW(kTag, "Registry is busy; retaining %s WAV until a slot is free",
+                                     loading_next ? "look-ahead" : "staged");
                         }
                     } else {
                         heap_caps_free(queued.wav_data);
@@ -821,6 +834,11 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         if (have_next && !next.published) {
             if (publish_item(next)) {
                 ESP_LOGI(kTag, "Published retained look-ahead item %s", next.uri.c_str());
+            }
+        }
+        if (have_staged && !staged.published) {
+            if (publish_item(staged)) {
+                ESP_LOGI(kTag, "Published retained staged item %s", staged.uri.c_str());
             }
         }
 
@@ -934,7 +952,8 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         // as soon as PLAYING was observed, which left short single-item WAVs
         // with no useful playback-position evidence.
         const TickType_t position_now = xTaskGetTickCount();
-        if (static_cast<int32_t>(position_now - next_position_info_poll) >= 0) {
+        if ((!current.observed_playing || next.next_uri_observed) &&
+            static_cast<int32_t>(position_now - next_position_info_poll) >= 0) {
             next_position_info_poll =
                 position_now + pdMS_TO_TICKS(1000);
             std::string track_duration;
@@ -969,6 +988,14 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             current = std::move(next);
             next = Item{};
             have_next = false;
+            if (have_staged) {
+                next = std::move(staged);
+                staged = Item{};
+                have_next = true;
+                have_staged = false;
+                ESP_LOGI(kTag, "Promoted staged WAV to next look-ahead item %s",
+                         next.uri.c_str());
+            }
             current.started = xTaskGetTickCount();
             current.resource.control_response_us = transition_observed_us;
             current.playback_start_logged = true;
@@ -1225,6 +1252,14 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                     current = std::move(next);
                     next = Item{};
                     have_next = false;
+                    if (have_staged) {
+                        next = std::move(staged);
+                        staged = Item{};
+                        have_next = true;
+                        have_staged = false;
+                        ESP_LOGI(kTag, "Promoted staged WAV after sequential fallback %s",
+                                 next.uri.c_str());
+                    }
                     current.started = xTaskGetTickCount();
                     current.resource.control_response_us = esp_timer_get_time();
                     current.observed_playing = false;
@@ -1272,6 +1307,10 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
     if (have_next) {
         if (next.published) resource_registry_.Retire(next.path);
         else if (next.resource.wav_data != nullptr) heap_caps_free(next.resource.wav_data);
+    }
+    if (have_staged) {
+        if (staged.published) resource_registry_.Retire(staged.path);
+        else if (staged.resource.wav_data != nullptr) heap_caps_free(staged.resource.wav_data);
     }
 }
 
