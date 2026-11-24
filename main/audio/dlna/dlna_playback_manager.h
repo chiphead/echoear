@@ -66,11 +66,12 @@ private:
     // while subsequent complete utterances are buffered without fragmenting
     // ordinary speech into independently initialized DLNA media items.
     static constexpr size_t kBufferCount = 3;
-    // Start a long utterance after about 2.0 seconds instead of waiting for
-    // the full TTS response. A 128 KiB segment is 2.048 s at 32 kHz mono
-    // PCM16; this stays above the short 1.0 s WAV size that failed on the
-    // Sony SRS-X88, while keeping sub-2.0 s utterances as a single resource.
-    static constexpr size_t kPcmSegmentBytes = 128 * 1024;
+    // Start a long utterance after about 2.24 seconds. The previous 128 KiB
+    // threshold produced a 164 ms trailing WAV in a 4.26 s utterance; the
+    // SRS-X88 accepted the resource but never entered PLAYING for that tail.
+    // 140 KiB is 2.24 s at 32 kHz mono PCM16 and gives that utterance two
+    // substantial resources (2.24 s + about 2.02 s), avoiding a tiny final item.
+    static constexpr size_t kPcmSegmentBytes = 140 * 1024;
     DlnaPcmBuffer buffers_[kBufferCount] = {
         DlnaPcmBuffer(kPcmSegmentBytes),
         DlnaPcmBuffer(kPcmSegmentBytes),
