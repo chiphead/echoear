@@ -5,6 +5,7 @@
 #include <string>
 
 #include <esp_http_client.h>
+#include <esp_timer.h>
 #include <esp_log.h>
 
 namespace {
@@ -78,8 +79,10 @@ bool Invoke(const DlnaRenderer& renderer, const char* action,
                                                static_cast<int>(body.size()));
     }
 
+    const int64_t action_started_us = esp_timer_get_time();
     esp_err_t request_result = setup;
     if (setup == ESP_OK) request_result = esp_http_client_perform(client);
+    const int64_t action_finished_us = esp_timer_get_time();
     const int status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
 
@@ -99,7 +102,8 @@ bool Invoke(const DlnaRenderer& renderer, const char* action,
     }
 
     if (response_body != nullptr) *response_body = response.body;
-    ESP_LOGI(kTag, "%s accepted by renderer (HTTP %d)", action, status);
+    ESP_LOGI(kTag, "%s accepted by renderer (HTTP %d, elapsed=%lldms)", action, status,
+             static_cast<long long>((action_finished_us - action_started_us) / 1000));
     return true;
 }
 }  // namespace
