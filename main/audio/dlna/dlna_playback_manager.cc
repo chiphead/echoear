@@ -792,8 +792,10 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
         if (!have_next || !have_staged) {
             Resource queued{};
             const bool loading_next = !have_next;
-            if (xQueueReceive(resource_queue_, &queued,
-                              loading_next ? pdMS_TO_TICKS(100) : 0) == pdTRUE) {
+            const BaseType_t received = xQueueReceive(
+                resource_queue_, &queued,
+                loading_next ? pdMS_TO_TICKS(100) : 0);
+            if (received == pdTRUE) {
                 ESP_LOGI(kTag, "Dequeued %s segment: %u ms, queue_depth=%u/%u queue_wait=%lldms pcm_to_dequeue=%lldms",
                          loading_next ? "look-ahead" : "staged",
                          static_cast<unsigned>(queued.duration_ms),
@@ -823,6 +825,10 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
                         ESP_LOGW(kTag, "Discarded malformed queued WAV resource");
                     }
                 }
+            } else if (!loading_next) {
+                // Keep the worker from spinning while waiting for a staged
+                // segment to arrive during current+next playback.
+                vTaskDelay(pdMS_TO_TICKS(100));
             }
         } else {
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -947,10 +953,9 @@ void DlnaPlaybackManager::ProcessResource(const Resource& first_resource) {
             stopped_since = 0;
         }
 
-        // PositionInfo is sampled during active playback as well as during
-        // preloaded-item transitions. The previous condition stopped polling
-        // as soon as PLAYING was observed, which left short single-item WAVs
-        // with no useful playback-position evidence.
+        // Poll PositionInfo before PLAYING and while observing a preloaded
+        // URI transition. Avoid a blocking SOAP round-trip during steady-state
+        // playback, where it can delay preparation and control of later items.
         const TickType_t position_now = xTaskGetTickCount();
         if ((!current.observed_playing || next.next_uri_observed) &&
             static_cast<int32_t>(position_now - next_position_info_poll) >= 0) {
